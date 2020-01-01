@@ -66,7 +66,7 @@ print("plugin loaded...")
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.00,
+WebBanking{version  = 1.01,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -185,9 +185,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       }
     else
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
-      -- hack: make checkbox to text field
-      html:xpath('//*[@name="rememberMe"]'):attr('type','text')
-      html:xpath('//*[@name="rememberMe"]'):attr("value",'true')
+      -- checkbox
+      html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
       enterCredentials()
       captcha1run=true
     end
@@ -209,9 +208,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       }
     else
       html:xpath('//*[@name="otpCode"]'):attr("value",credentials[1])
-      -- hack: make checkbox to text field
-      html:xpath('//*[@name="rememberDevice"]'):attr('type','text')
-      html:xpath('//*[@name="rememberDevice"]'):attr("value",'true')
+      -- checkbox
+      html:xpath('//*[@name="rememberDevice"]'):attr('checked','checked')
       html= connectShop(html:xpath('//*[@id="auth-mfa-form"]'):submit())
       mfa1run=true
     end
@@ -282,6 +280,7 @@ function RefreshAccount (account, since)
         amount = 0,
         bookingDate = 1,
         purpose = "... and drink a coffee :)",
+        booked = false,
       }
     }}
   end
