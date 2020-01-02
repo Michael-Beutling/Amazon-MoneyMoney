@@ -22,6 +22,7 @@ local mfa1run
 local aName
 local html
 local configDirty=false
+local cleanCache=false
 
 local config={
   str2date = {
@@ -45,6 +46,11 @@ local config={
   contra="Amazon contra ",
   encoding='latin9',
   reallyLogout=false,
+  maxOrdersToRead=250,
+  cleanCookies=false,
+  cleanOrdersCache=false,
+  cleanFilterCache=false,
+  debug=false,
 }
 
 function mergeConfig(default,read)
@@ -87,6 +93,30 @@ else
   configDirty=true
 end
 
+
+if LocalStorage ~=nil then
+  if config['cleanOrdersCache'] and LocalStorage ~=nil then
+    config['cleanOrdersCache']=false
+    configDirty=true
+    print("clean orders cache...")
+    LocalStorage.OrderCache={}
+  end
+
+  if config['cleanFilterCache']  then
+    config['cleanFilterCache']=false
+    configDirty=true
+    print("clean filter cache...")
+    LocalStorage.orderFilterCache={}
+  end
+
+  if config['cleanCookies']  then
+    config['cleanCookies']=false
+    configDirty=true
+    print("clean cookies...")
+    LocalStorage.cookies=nil
+  end
+
+end
 if configDirty then
   print('write config...')
   configFile=io.open(configFileName,"wb")
@@ -95,10 +125,11 @@ if configDirty then
 end
 
 print(config['services'][1],"plugin loaded...")
+if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.02,
+WebBanking{version  = 1.03,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -191,8 +222,6 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     secPassword=credentials[2]
     captcha1run=true
     mfa1run=true
-    -- uncomment for forced log out
-    --LocalStorage.cookies=nil
     aName=nil
 
     html = connectShop("GET",baseurl)
@@ -332,6 +361,7 @@ function RefreshAccount (account, since)
   --LocalStorage.orderFilterCache={}
 
   local orders={}
+  local numOfOrders=0
   local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
   orderFilterSelect:each(function(index,element)
     local orderFilterVal=element:attr('value')
@@ -347,8 +377,9 @@ function RefreshAccount (account, since)
           local url=orderLink:attr('href')
           local orderCode=string.match(url,'orderID=([%d-]+)')
           if orderCode ~= "" then
-            if  LocalStorage.OrderCache[orderCode] == nil then
-              -- print("new order="..orderCode)
+            if  LocalStorage.OrderCache[orderCode] == nil and orders[orderCode] == nil then
+              if config['debug'] then print("new order="..orderCode,'No='..numOfOrders) end
+              numOfOrders=numOfOrders+1
               orders[orderCode]=url
               foundNewOrders=true
             end
@@ -369,15 +400,36 @@ function RefreshAccount (account, since)
       end
     end
     --print("new orders="..#orders)
-    return true
+    return numOfOrders<config['maxOrdersToRead']
   end)
 
   local posbox='//div[@class="a-row"]/div[contains(@class,"a-fixed-left-grid")]//'
+  local maxOrders=numOfOrders
+  if maxOrders >= config['maxOrdersToRead'] then
+    maxOrders=config['maxOrdersToRead']
+  end
+
+  numOfOrders=0
+  local invaildOrder=''
+  local transactions={}
 
   for orderCode,orderUrl in pairs(orders) do
+    numOfOrders=numOfOrders+1
     html=connectShop("GET",orderUrl)
+    if html:xpath('//div[@id="orderDetails"]'):text() == "" then
+      if invaildOrder == '' then
+        invaildOrder=orderCode
+      end
+      break
+    end
     local orderDate = MM.toEncoding(config['encoding'],html:xpath('//span[@class="order-date-invoice-item"]'):text())
-    print("orderCode="..orderCode.." orderDate="..orderDate)
+    if orderDate == "" then
+      orderDate = MM.toEncoding(config['encoding'],html:xpath('//span[@class="a-color-secondary value"]'):text())
+      if config['debug'] then
+        invaildOrder=orderCode
+      end
+    end
+    print(numOfOrders..'/'..maxOrders,'orderCode='..orderCode,'orderDate='..orderDate)
     if orderDate ~= "" then
       local orderDay,orderMonth,orderYear=string.match(orderDate,"(%d+)%.%s+([%wä]+)%s+(%d+)")
       local orderMonth=config['str2date'][orderMonth]
@@ -404,13 +456,36 @@ function RefreshAccount (account, since)
         end
 
       else
-        error("date error, order="..orderCode)
+        invaildOrder=orderCode
       end
+    else
+      invaildOrder=orderCode
     end
 
+    if numOfOrders >= config['maxOrdersToRead'] then
+      print('maximal orders to read limit of',config['maxOrdersToRead'],'reached!')
+      table.insert(transactions,{
+        name="Warning, max order limit reached.",
+        amount = 0,
+        bookingDate = os.time(),
+        purpose = string.format('Please reload the account to get the next %d orders.',config['maxOrdersToRead']),
+        booked=false,
+      })
+      break
+    end
   end
 
-  local transactions={}
+
+  if invaildOrder ~='' then
+    table.insert(transactions,{
+      name=invaildOrder,
+      amount = 0,
+      bookingDate = os.time(),
+      purpose = 'Error: Invalid order found, a account reload can be fix it.',
+      booked=false,
+    })
+  end
+
   local balance=0
   --since=0
   for orderCode,order in pairs(LocalStorage.OrderCache) do
