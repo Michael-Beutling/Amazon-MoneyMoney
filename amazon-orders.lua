@@ -21,6 +21,7 @@ local captcha1run
 local mfa1run
 local aName
 local html
+local configDirty=false
 
 local config={
   str2date = {
@@ -43,30 +44,61 @@ local config={
   description = "Give you a overview about your amazon orders.",
   contra="Amazon contra ",
   encoding='latin9',
+  reallyLogout=false,
 }
 
+function mergeConfig(default,read)
+  for k,v in pairs(default) do
+    if type(v) == 'table' then
+      if type(read[k]) ~= 'table' then
+        read[k] = {}
+      end
+      mergeConfig(v,read[k])
+    else
+      if type(read[k]) ~= 'nil'then
+        if default[k]~=read[k] then
+          default[k]=read[k]
+          --print(k,'=',read[k])
+        end
+      else
+        configDirty=true
+      end
+    end
+  end
+end
+
+
 local configFileName='amazon_orders.json'
+
 -- run every time which plug in is loaded
 local configFile=io.open(configFileName,"rb")
+
 if configFile~=nil then
   local configJson=configFile:read('*all')
   --print(configJson)
   local configTemp=JSON(configJson):dictionary()
   if configTemp['configOk'] then
-    config=configTemp
+    configDirty=false
+    mergeConfig(config,configTemp)
     print('config read...')
   end
+  io.close(configFile)
 else
+  configDirty=true
+end
+
+if configDirty then
   print('write config...')
   configFile=io.open(configFileName,"wb")
   configFile:write(JSON():set(config):json())
+  io.close(configFile)
 end
-io.close(configFile)
-print("plugin loaded...")
+
+print(config['services'][1],"plugin loaded...")
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.01,
+WebBanking{version  = 1.02,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -345,7 +377,7 @@ function RefreshAccount (account, since)
   for orderCode,orderUrl in pairs(orders) do
     html=connectShop("GET",orderUrl)
     local orderDate = MM.toEncoding(config['encoding'],html:xpath('//span[@class="order-date-invoice-item"]'):text())
-    --print("orderCode="..orderCode.." orderDate="..orderDate)
+    print("orderCode="..orderCode.." orderDate="..orderDate)
     if orderDate ~= "" then
       local orderDay,orderMonth,orderYear=string.match(orderDate,"(%d+)%.%s+([%wä]+)%s+(%d+)")
       local orderMonth=config['str2date'][orderMonth]
@@ -412,7 +444,9 @@ function RefreshAccount (account, since)
 end
 
 function EndSession ()
--- Logout.
--- print("logout, not really :)")
+  -- Logout.
+  if config['reallyLogout'] then
+    html= connectShop(html:xpath('//a[contains(@href,"signout")]'):click())
+  end
 end
 
