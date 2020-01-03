@@ -152,6 +152,11 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   end
 
   if method == 'POST' then
+    if config['debug'] then
+      for i in string.gmatch(postContent, "([^&]+)") do
+        print("post='"..i.."'")
+      end
+    end
   end
 
   if connection == nil then
@@ -172,13 +177,17 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
 
 
   local content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
-
   if baseurl == connection:getBaseURL():lower():sub(1,#baseurl) then
-    --print("store cookies=",connection:getCookies())
 
     -- work around for deleted cookies, prevent captcha
     connection:setCookie('a-ogbcbff=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
     connection:setCookie('ap-fid=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/ap/; Secure')
+
+    if config['debug'] then
+      if LocalStorage.cookies~=connection:getCookies() then
+        print("store cookies=",connection:getCookies())
+      end
+    end
 
     for i in string.gmatch(connection:getCookies(), '([^; ]+)') do
       if  i:sub(1, #'ap-fid=') == 'ap-fid=' or i:sub(-#'=deleted') == '=deleted' then
@@ -187,7 +196,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
     end
     LocalStorage.cookies=connection:getCookies()
   else
-  -- print("skip cookie saving")
+    if config['debug'] then print("skip cookie saving") end
   end
   return content
 end
