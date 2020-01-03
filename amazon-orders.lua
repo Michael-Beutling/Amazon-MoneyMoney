@@ -129,7 +129,7 @@ if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.03,
+WebBanking{version  = 1.04,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -140,10 +140,6 @@ function connectShop(method, url, postContent, postContentType, headers)
 end
 
 function connectShopRaw(method, url, postContent, postContentType, headers)
-  if url:lower():sub(1,4) ~= "http" then
-    url=baseurl..url
-  end
-
   -- postContentType=postContentType or "application/json"
 
   if headers == nil then
@@ -177,7 +173,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
 
   local content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
 
-  if baseurl == url:lower():sub(1,#baseurl) then
+  if baseurl == connection:getBaseURL():lower():sub(1,#baseurl) then
     --print("store cookies=",connection:getCookies())
 
     -- work around for deleted cookies, prevent captcha
@@ -208,6 +204,10 @@ function enterCredentials()
     html:xpath('//*[@name="email"]'):attr("value", secUsername)
     html:xpath('//*[@name="password"]'):attr("value",secPassword)
     html= connectShop(html:xpath(xpform):submit())
+    if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
+      print("skip phone dialog...")
+      html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
+    end
   end
 end
 
@@ -217,7 +217,6 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     if LocalStorage.getOrders == nil then
       LocalStorage.getOrders={}
     end
-
     secUsername=credentials[1]
     secPassword=credentials[2]
     captcha1run=true
@@ -235,14 +234,14 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
   --div id="image-captcha-section"
   if captcha ~= "" then
-    -- print("login captcha")
+    if config['debug'] then print("login captcha") end
     if captcha1run then
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
       return {
-        title=html:xpath('//div[@id="auth-warning-message-box"]//li'):text(),
+        title=MM.toEncoding(config['encoding'],html:xpath('//li'):text()),
         challenge=pic,
-        label=html:xpath('//div[@id="auth-warning-message-box"]//h4'):text()
+        label=MM.toEncoding(config['encoding'],html:xpath('//form//h4'):text())
       }
     else
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
@@ -255,16 +254,74 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
   enterCredentials()
 
+  -- passcode
+
+  if html:xpath('//form[@name="claimspicker"]'):text() ~= ''  then
+    local text=''
+    local number=0
+    local passcode1run=true
+    if config['debug'] then print("passcode 1. part") end
+    html:xpath('//input[@type="radio"]'):each(function (index,element)
+      text=text..index..". "..element:xpath('..'):text().."\n"
+      number=index
+      if  tonumber(index) == tonumber(credentials[1]) then
+        element:attr('checked','checked')
+        if config['debug'] then print("select",element:xpath('..'):text()) end
+        passcode1run=false
+      else
+        element:attr('checked','')
+      end
+      --print(index,element:xpath('..'):text(),element:attr('checked'))
+    end)
+    if number == 0 then
+      -- no selectable options
+      html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
+      if html:xpath('//form[@action="verify"]'):text() ~= '' then
+        return {
+          title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[1]'):text()),
+          challenge=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[2]'):text()),
+          label='Code'
+        }
+      end
+    else
+      if passcode1run then
+        passcode1run=false
+        -- ask for passcode methode, feature request select field when return value a table?
+        return {
+          title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="claimspicker"]//div[1]'):text()),
+          challenge=MM.toEncoding(config['encoding'],text),
+          label='Please select 1-'..number
+        }
+      else
+        html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
+        if html:xpath('//form[@action="verify"]'):text() ~= '' then
+          return {
+            title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[1]'):text()),
+            challenge=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[2]'):text()),
+            label='Code'
+          }
+        end
+      end
+    end
+  end
+
+  -- passcode part 2
+  if html:xpath('//form[@action="verify"]'):text() ~= '' then
+    if config['debug'] then print("passcode 2. part") end
+    html:xpath('//*[@name="code"]'):attr("value",credentials[1])
+    html= connectShop(html:xpath('//form[@action="verify"]'):submit())
+  end
+
   -- 2.FA
   local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
   if mfatext ~= "" then
-    -- print("login mfa")
+    if config['debug'] then print("login mfa") end
     if mfa1run then
       -- print("mfa="..mfatext)
       mfa1run=false
       return {
         title='Two-factor authentication',
-        challenge=mfatext,
+        challenge=MM.toEncoding(config['encoding'],mfatext),
         label='Code'
       }
     else
