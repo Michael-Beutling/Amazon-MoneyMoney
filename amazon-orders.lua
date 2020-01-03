@@ -44,7 +44,6 @@ local config={
   services    = {"Amazon Orders"},
   description = "Give you a overview about your amazon orders.",
   contra="Amazon contra ",
-  encoding='latin9',
   reallyLogout=true,
   maxOrdersToRead=250,
   cleanCookies=false,
@@ -129,7 +128,7 @@ if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.04,
+WebBanking{version  = 1.05,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -198,7 +197,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   else
     if config['debug'] then print("skip cookie saving") end
   end
-  return content
+  return content,charset
 end
 
 
@@ -248,9 +247,9 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
       return {
-        title=MM.toEncoding(config['encoding'],html:xpath('//li'):text()),
+        title=html:xpath('//li'):text(),
         challenge=pic,
-        label=MM.toEncoding(config['encoding'],html:xpath('//form//h4'):text())
+        label=html:xpath('//form//h4'):text()
       }
     else
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
@@ -287,8 +286,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
       if html:xpath('//form[@action="verify"]'):text() ~= '' then
         return {
-          title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[1]'):text()),
-          challenge=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[2]'):text()),
+          title=html:xpath('//form[@action="verify"]//div[1]//div[1]'):text(),
+          challenge=html:xpath('//form[@action="verify"]//div[1]//div[2]'):text(),
           label='Code'
         }
       end
@@ -297,16 +296,16 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
         passcode1run=false
         -- ask for passcode methode, feature request select field when return value a table?
         return {
-          title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="claimspicker"]//div[1]'):text()),
-          challenge=MM.toEncoding(config['encoding'],text),
+          title=html:xpath('//form[@action="claimspicker"]//div[1]'):text(),
+          challenge=text,
           label='Please select 1-'..number
         }
       else
         html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
         if html:xpath('//form[@action="verify"]'):text() ~= '' then
           return {
-            title=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[1]'):text()),
-            challenge=MM.toEncoding(config['encoding'],html:xpath('//form[@action="verify"]//div[1]//div[2]'):text()),
+            title=html:xpath('//form[@action="verify"]//div[1]//div[1]'):text(),
+            challenge=html:xpath('//form[@action="verify"]//div[1]//div[2]'):text(),
             label='Code'
           }
         end
@@ -330,7 +329,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       mfa1run=false
       return {
         title='Two-factor authentication',
-        challenge=MM.toEncoding(config['encoding'],mfatext),
+        challenge=mfatext,
         label='Code'
       }
     else
@@ -488,9 +487,9 @@ function RefreshAccount (account, since)
       end
       break
     end
-    local orderDate = MM.toEncoding(config['encoding'],html:xpath('//span[@class="order-date-invoice-item"]'):text())
+    local orderDate = html:xpath('//span[@class="order-date-invoice-item"]'):text()
     if orderDate == "" then
-      orderDate = MM.toEncoding(config['encoding'],html:xpath('//span[@class="a-color-secondary value"]'):text())
+      orderDate = html:xpath('//span[@class="a-color-secondary value"]'):text()
       if config['debug'] then
         invaildOrder=orderCode
       end
@@ -505,7 +504,7 @@ function RefreshAccount (account, since)
         local total=0
         for k,position in pairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
           position:each(function (index,element)
-            local purpose=MM.toEncoding(config['encoding'],element:xpath('../..//a'):text())
+            local purpose=element:xpath('../..//a'):text()
             local amount=element:text()
             purpose=string.match(purpose,"^%s*(.+)%s*$")
             local amountHigh,amountLow=string.match(amount,"(%d+)[,%.](%d%d)")
