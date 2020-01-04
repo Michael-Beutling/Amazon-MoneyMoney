@@ -27,6 +27,9 @@ local webCache=false
 local webCacheFolder='webCache'
 local webCacheHit=false
 local webCacheState='start'
+local invalidPrice=1e99
+local invalidDate=1e99
+local invalidQty=1e99
 
 local config={
   str2date = {
@@ -54,6 +57,8 @@ local config={
   cleanOrdersCache=false,
   cleanFilterCache=false,
   debug=false,
+  splitQty=1,
+  differenceText='Difference (shipping costs, coupon etc.)'
 }
 
 function mergeConfig(default,read)
@@ -257,6 +262,68 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   return content,charset
 end
 
+function getDate(text)
+  if type(text)~='string' then
+    return false
+  end
+  local day,month,year=string.match(text,"(%d+)%.%s+([%S]+)%s+(%d+)")
+  local month=config['str2date'][month]
+  if month ~= nil then
+    return os.time({year=year,month=month,day=day})
+  end
+  error(text)
+  return invalidDate -- error value
+end
+
+function getPrice(text)
+  if type(text)~='string' then
+    return invalidPrice
+  end
+  local amountHigh,amountLow=string.match(text,"(%d+)[,%.](%d%d)")
+  if amountHigh == nil or amountLow == nil then
+    return invalidPrice
+  end
+  return amountHigh*100+amountLow
+end
+
+function getQty(text)
+  if type(text)~='string' then
+    return invalidQty
+  end
+  local qty=tonumber(text)
+  if qty>0 then
+    return qty
+  end
+  return invalidQty
+end
+
+
+function removeSpaces(text)
+  if type(text)~='string' then
+    return nil
+  end
+  return string.match(text,"^%s*(.+)%s*$")
+end
+
+function isOrderCode(text)
+  if type(text)~='string' then
+    return false
+  end
+  local orderCode=string.match(text,"(%d+%-%d+%-%d+)")
+  return orderCode ~= nil
+end
+
+function getOrderCode(text)
+  if type(text)~='string' then
+    return nil
+  end
+  local orderCode=string.match(text,"(%d+%-%d+%-%d+)")
+  return orderCode
+end
+
+function nodeExists(element,xpath)
+  return element:xpath(xpath)[1] ~= nil
+end
 
 function SupportsBank (protocol, bankCode)
   return protocol == ProtocolWebBanking and "Amazon Orders" == bankCode:sub(1,#"Amazon Orders")
@@ -462,7 +529,7 @@ function RefreshAccount (account, since)
   if account.accountNumber == "mix" then
     mixed=true
   end
-  print("Refresh ",account.accountNumber)
+  print("Refresh",account.accountNumber)
   if LocalStorage.getOrders[account.accountNumber] == false or LocalStorage.getOrders[account.accountNumber] == nil then
     LocalStorage.getOrders[account.accountNumber]=true
 
@@ -489,7 +556,6 @@ function RefreshAccount (account, since)
   if LocalStorage.orderFilterCache == nil then
     LocalStorage.orderFilterCache={}
   end
-  --LocalStorage.orderFilterCache={}
 
   local orders={}
   local numOfOrders=0
@@ -504,10 +570,52 @@ function RefreshAccount (account, since)
       html=connectShop(html:xpath('//*[@id="timePeriodForm"]'):submit())
       local foundEnd=false
       repeat
+        -- get order details from overview when possible
+        html:xpath('//div[contains(@class,"a-box-group")]'):each(function (index,element)
+          if element:xpath('.//div[contains(@class,"shipment")]//a[contains(@href,"order-details")]'):text()=='' then
+            local headData={}
+            element:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
+              headData[index]=element:text()
+            end)
+            local bookingDate,orderSum,orderCode=getDate(headData[1]),getPrice(headData[2]),getOrderCode(headData[3])
+            if orderCode ~= nil then
+              if orderSum ~= invalidPrice then
+                if bookingDate >0 then
+                  --print(bookingDate,orderSum,orderCode)
+                  local vaildOrder=true
+                  local orderPositions={}
+                  local total=0
+                  element:xpath('.//div[@class="a-row"]/a[contains(@href,"/gp/product/")]/../..'):each(function (index,element)
+                    --print(element:xpath('.//a[contains(@href,"/gp/product/")]'):text(),element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
+                    local qty=1
+                    local purpose=removeSpaces(element:xpath('.//a[contains(@href,"/gp/product/")]'):text())
+                    local amount=getPrice(element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
+                    if nodeExists(element,'..//span[@class="item-view-qty"]') then
+                      qty=getQty(element:xpath('..//span[@class="item-view-qty"]'):text())
+                    end
+                    if purpose ~= nil and amount ~= invalidPrice and qty~= invalidQty then
+                      table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
+                      total=total+amount*qty
+                    else
+                      vaildOrder=false
+                    end
+                    return vaildOrder
+                  end)
+                  
+                  if vaildOrder and #orderPositions>0 then
+                    LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
+                  end
+                end
+              end
+            end
+          end
+        end)
+        -- get all order details urls
         html:xpath('//a[contains(@href,"order-details")]'):each(function(index,orderLink)
           local url=orderLink:attr('href')
           local orderCode=string.match(url,'orderID=([%d-]+)')
           if orderCode ~= "" then
+            -- order cached?
             if  LocalStorage.OrderCache[orderCode] == nil and orders[orderCode] == nil then
               if config['debug'] then print("new order="..orderCode,'No='..numOfOrders) end
               numOfOrders=numOfOrders+1
@@ -543,7 +651,7 @@ function RefreshAccount (account, since)
   numOfOrders=0
   local invaildOrder=''
   local transactions={}
-
+  -- get order details from order details page
   for orderCode,orderUrl in pairs(orders) do
     numOfOrders=numOfOrders+1
     html=connectShop("GET",orderUrl)
@@ -562,27 +670,31 @@ function RefreshAccount (account, since)
     end
     print(numOfOrders..'/'..maxOrders,'orderCode='..orderCode,'orderDate='..orderDate)
     if orderDate ~= "" then
-      local orderDay,orderMonth,orderYear=string.match(orderDate,"(%d+)%.%s+([%wä]+)%s+(%d+)")
-      local orderMonth=config['str2date'][orderMonth]
-      if orderMonth ~= nil then
-        local bookingDate=os.time({year=orderYear,month=orderMonth,day=orderDay})
+      local orderSum=invalidPrice
+      html:xpath('//span[contains(@class,"a-text-bold")]'):each(function (index,element)
+        orderSum=getPrice(element:text())
+        return orderSum==invalidPrice
+      end)
+      local bookingDate=getDate(orderDate)
+      if bookingDate>0 and orderSum ~= invalidPrice then
         local orderPositions={}
         local total=0
-        for k,position in pairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
+        for k,position in ipairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
           position:each(function (index,element)
-            local purpose=element:xpath('../..//a'):text()
-            local amount=element:text()
-            purpose=string.match(purpose,"^%s*(.+)%s*$")
-            local amountHigh,amountLow=string.match(amount,"(%d+)[,%.](%d%d)")
-            amount=amountHigh*100+amountLow
+            local purpose=removeSpaces(element:xpath('../..//a'):text())
+            local amount=getPrice(element:text())
+            local qty=1
+            if nodeExists(element,'../../..//span[@class="item-view-qty"]') then
+              qty=getQty(element:xpath('../../..//span[@class="item-view-qty"]'):text())
+            end
             --print(purpose,amount)
-            table.insert(orderPositions,{purpose=purpose,amount=amount})
-            total=total+amount
+            table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
+            total=total+amount*qty
             return true
           end)
         end
         if #orderPositions >0 then
-          LocalStorage.OrderCache[orderCode]={total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
+          LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
           --print("store="..orderCode)
         end
 
@@ -620,21 +732,39 @@ function RefreshAccount (account, since)
   local balance=0
   --since=0
   for orderCode,order in pairs(LocalStorage.OrderCache) do
-    balance=balance+order.total
+    balance=balance+order.orderSum
+    if order.orderSum ~= order.total then
+      table.insert(transactions,{
+        name=orderCode,
+        amount = (order.orderSum-order.total)/divisor,
+        bookingDate = order.bookingDate,
+        purpose = config['differenceText'],
+        booked=not webCache
+      })
+    end
     if order.since >= since then
       for index,position in pairs(order.orderPositions) do
-        table.insert(transactions,{
-          name=orderCode,
-          amount = position.amount/divisor,
-          bookingDate = order.bookingDate,
-          purpose = position.purpose,
-          booked=not webCache
-        })
+        local rQty=1
+        local mQty=1
+        if position.qty> config['splitQty'] then
+          mQty=position.qty
+        else
+          rQty=position.qty
+        end
+        for i=1,rQty,1 do
+          table.insert(transactions,{
+            name=orderCode,
+            amount = position.amount/divisor*mQty,
+            bookingDate = order.bookingDate+1,
+            purpose = position.purpose,
+            booked=not webCache
+          })
+        end
       end
       if mixed then
         table.insert(transactions,{
           name=orderCode,
-          amount = order.total/divisor*-1,
+          amount = order.orderSum/divisor*-1,
           bookingDate = order.bookingDate,
           purpose = config['contra']..orderCode,
           booked=not webCache
