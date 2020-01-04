@@ -30,6 +30,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
+local cacheVersion=1
 
 local config={
   str2date = {
@@ -104,6 +105,14 @@ end
 
 
 if LocalStorage ~=nil then
+  if LocalStorage.cacheVersion ~= cacheVersion then
+    configDirty=true
+    print("clean caches...")
+    LocalStorage.OrderCache={}
+    LocalStorage.orderFilterCache={}
+    LocalStorage.cacheVersion = cacheVersion
+  end
+  
   if config['cleanOrdersCache'] and LocalStorage ~=nil then
     config['cleanOrdersCache']=false
     configDirty=true
