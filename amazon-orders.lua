@@ -58,7 +58,8 @@ local config={
   cleanFilterCache=false,
   debug=false,
   splitQty=1,
-  differenceText='Difference (shipping costs, coupon etc.)'
+  fixEncoding='latin1',
+  differenceText='Difference (shipping costs, coupon etc.)',
 }
 
 function mergeConfig(default,read)
@@ -756,7 +757,7 @@ function RefreshAccount (account, since)
             name=orderCode,
             amount = position.amount/divisor*mQty,
             bookingDate = order.bookingDate+1,
-            purpose = position.purpose,
+            purpose = MM.toEncoding(config['fixEncoding'],position.purpose),
             booked=not webCache
           })
         end
