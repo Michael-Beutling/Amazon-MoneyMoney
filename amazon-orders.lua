@@ -147,7 +147,7 @@ if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.05,
+WebBanking{version  = 1.06,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
