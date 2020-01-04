@@ -23,6 +23,10 @@ local aName
 local html
 local configDirty=false
 local cleanCache=false
+local webCache=false
+local webCacheFolder='webCache'
+local webCacheHit=false
+local webCacheState='start'
 
 local config={
   str2date = {
@@ -174,10 +178,62 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
     end) --pcall
   end
 
+  local cached=false
+  local content, charset, mimeType, filename, headers
+  local id
+  if webCache then
+    id=MM.md5(tostring(method)..tostring(url)..tostring(postContent)..tostring(postContentType)..tostring(headers)..webCacheState)
+    local webFile=io.open(webCacheFolder..'/'..id..'.json','rb')
+    if webFile then
+      local metaJSON=webFile:read('*all')
+      local meta=JSON(metaJSON):dictionary()
+      webFile:close()
+      webFile=io.open(webCacheFolder..'/'..id..'.html','rb')
+      if webFile then
+        content=webFile:read('*all')
+        webFile:close()
+        charset=meta['charset']
+        mimeType=meta['mimeType']
+        filename=meta['filename']
+        headers=meta['headers']
+        cached=true
+        print("webCache id="..id.." read.")
+        webCacheHit=true
+      end
+    end
+    if not cached and webCacheHit then
+      error('webCache error!')
+    end
 
-  local content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
-  if baseurl == connection:getBaseURL():lower():sub(1,#baseurl) then
+  end
 
+  if not cached then
+    content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
+    if webCache then
+      local webFile=io.open(webCacheFolder..'/'..id..'.json',"wb")
+      webFile:write(JSON():set({
+        charset=charset,
+        mimeType=mimeType,
+        filename=filename,
+        headers=headers,
+        request={
+          method=method,
+          url=url,
+          postContent=postContent,
+          postContentType=postContentType,
+          headers=headers,
+        },
+        webCacheState=webCacheState,
+      }):json())
+      webFile:close()
+      webFile=io.open(webCacheFolder..'/'..id..'.html',"wb")
+      webFile:write(content)
+      webFile:close()
+      print("webCache id="..id.." written.")
+    end
+  end
+
+  if not cached and baseurl == connection:getBaseURL():lower():sub(1,#baseurl)  then
     -- work around for deleted cookies, prevent captcha
     connection:setCookie('a-ogbcbff=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
     connection:setCookie('ap-fid=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/ap/; Secure')
@@ -197,6 +253,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   else
     if config['debug'] then print("skip cookie saving") end
   end
+
   return content,charset
 end
 
@@ -205,7 +262,8 @@ function SupportsBank (protocol, bankCode)
   return protocol == ProtocolWebBanking and "Amazon Orders" == bankCode:sub(1,#"Amazon Orders")
 end
 
-function enterCredentials()
+function enterCredentials(state)
+  webCacheState=state
   local xpform='//*[@name="signIn"]'
   if html:xpath(xpform):attr("name") ~= '' then
     print("enter username/password")
@@ -230,11 +288,18 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     captcha1run=true
     mfa1run=true
     aName=nil
-
+    if config['debug'] then
+      webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
+      if webCache then
+        print("webcache on")
+        LocalStorage.OrderCache={}
+        LocalStorage.orderFilterCache={}
+      end
+    end
     html = connectShop("GET",baseurl)
     html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
 
-    enterCredentials()
+    enterCredentials('1.login')
   end
 
   -- Captcha
@@ -255,12 +320,12 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
       -- checkbox
       html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
-      enterCredentials()
+      enterCredentials('captcha')
       captcha1run=true
     end
   end
 
-  enterCredentials()
+  enterCredentials('after captcha')
 
   -- passcode
 
@@ -340,7 +405,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       mfa1run=true
     end
   end
-  enterCredentials()
+  enterCredentials('after passcode')
 
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
     aName=html:xpath('//span[@class="nav-line-3"]'):text()
@@ -387,6 +452,7 @@ end
 
 function RefreshAccount (account, since)
   local mixed=false
+  webCacheState='RefreshAccount'
 
   local divisor=-100
   if account.accountNumber == "inverse" then
@@ -561,7 +627,8 @@ function RefreshAccount (account, since)
           name=orderCode,
           amount = position.amount/divisor,
           bookingDate = order.bookingDate,
-          purpose = position.purpose
+          purpose = position.purpose,
+          booked=not webCache
         })
       end
       if mixed then
@@ -570,6 +637,7 @@ function RefreshAccount (account, since)
           amount = order.total/divisor*-1,
           bookingDate = order.bookingDate,
           purpose = config['contra']..orderCode,
+          booked=not webCache
         })
       end
     end
