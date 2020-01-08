@@ -112,7 +112,7 @@ if LocalStorage ~=nil then
     LocalStorage.orderFilterCache={}
     LocalStorage.cacheVersion = cacheVersion
   end
-  
+
   if config['cleanOrdersCache'] and LocalStorage ~=nil then
     config['cleanOrdersCache']=false
     configDirty=true
@@ -611,7 +611,7 @@ function RefreshAccount (account, since)
                     end
                     return vaildOrder
                   end)
-                  
+
                   if vaildOrder and #orderPositions>0 then
                     LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
                   end
@@ -798,3 +798,4 @@ function EndSession ()
   end
 end
 
+-- SIGNATURE: MC0CFQCYfBRYHMGiA9liVddPpnLLXQxOqgIUQ5wccLjVPWtTS2r3HJb+hlfd/y0=
