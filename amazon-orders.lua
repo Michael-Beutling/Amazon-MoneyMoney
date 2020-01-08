@@ -89,8 +89,9 @@ local configFileName='amazon_orders.json'
 -- run every time which plug in is loaded
 local configFile=nil
 -- io=nil
--- signed version has no io functions :(
-if io ~= nil then
+-- io.open=nil
+-- signed version has no io.open functions 
+if io ~= nil and io.open ~= nil then
   configFile=io.open(configFileName,"rb")
 end
 
@@ -141,14 +142,14 @@ if LocalStorage ~=nil then
 
 end
 
-if configDirty and io ~= nil then
+if configDirty and io ~= nil and io.open ~= nil then
   print('write config...')
   configFile=io.open(configFileName,"wb")
   configFile:write(JSON():set(config):json())
   io.close(configFile)
 end
 
-print((io == nil and 'signed ' or '')  .. config['services'][1],"plugin loaded...")
+print(((io == nil or io.open == nil) and 'signed ' or '')  .. config['services'][1],"plugin loaded...")
 if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
