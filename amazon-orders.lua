@@ -87,7 +87,12 @@ end
 local configFileName='amazon_orders.json'
 
 -- run every time which plug in is loaded
-local configFile=io.open(configFileName,"rb")
+local configFile=nil
+-- io=nil
+-- signed version has no io functions :(
+if io ~= nil then
+  configFile=io.open(configFileName,"rb")
+end
 
 if configFile~=nil then
   local configJson=configFile:read('*all')
@@ -135,19 +140,20 @@ if LocalStorage ~=nil then
   end
 
 end
-if configDirty then
+
+if configDirty and io ~= nil then
   print('write config...')
   configFile=io.open(configFileName,"wb")
   configFile:write(JSON():set(config):json())
   io.close(configFile)
 end
 
-print(config['services'][1],"plugin loaded...")
+print((io == nil and 'signed ' or '')  .. config['services'][1],"plugin loaded...")
 if config['debug'] then print('debugging...') end
 
 local baseurl='https://www'..config['domain']
 
-WebBanking{version  = 1.06,
+WebBanking{version  = 1.07,
   url         = baseurl,
   services    = config['services'],
   description = config['description']}
@@ -798,4 +804,3 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFQCYfBRYHMGiA9liVddPpnLLXQxOqgIUQ5wccLjVPWtTS2r3HJb+hlfd/y0=
