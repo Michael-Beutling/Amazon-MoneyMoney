@@ -3,6 +3,7 @@
 copy *amazon-orders.lua* script in the *~/Library/Containers/com.moneymoney-app.retail/Data/Library/Application\ Support/MoneyMoney/Extensions* Folder or run the *link_ext.sh* script in a shell.
 
 ## Config
+Only for unsigned version:
 For **.de** users it's already configured. For another sites please edit the JSON file in the *~/Library/Containers/com.moneymoney-app.retail/Data/* folder and hope the best ;) 
 
 The plugin generate the JSON file after the first loading via MoneyMoney.
