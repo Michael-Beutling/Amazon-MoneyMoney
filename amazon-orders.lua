@@ -90,7 +90,7 @@ local configFileName='amazon_orders.json'
 local configFile=nil
 -- io=nil
 -- io.open=nil
--- signed version has no io.open functions 
+-- signed version has no io.open functions
 if io ~= nil and io.open ~= nil then
   configFile=io.open(configFileName,"rb")
 end
@@ -805,3 +805,4 @@ function EndSession ()
   end
 end
 
+-- SIGNATURE: MCwCFE1C5ODuXQCNZJnIHA/CPpYwVsbcAhQyX+uoOR8Y+EhGiVJ9kGc4cVlmMA==
