@@ -625,14 +625,14 @@ function RefreshAccount (account, since)
                       LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
                     end
                   else
-                    print("no date found for order",orderCode,"found='"..headData[1].."'")
+                    print("no date found for order",orderCode,"found='"..tostring(headData[1]).."'")
                   end
                 else
-                  print("no valid sum found for order", orderCode, "found='"..headData[2].."'")
+                  print("no valid sum found for order", orderCode, "found='"..tostring(headData[2]).."'")
                 end
               end
             else
-              print("skip order, get wrong number of elements date='"..headData[1].."' sum='"..headData[2].."' code='"..headData[3].."'")
+              print("skip order, get wrong number of elements date='"..tostring(headData[1]).."' sum='"..tostring(headData[2]).."' code='"..tostring(headData[3]).."'")
             end
           end
         end)
