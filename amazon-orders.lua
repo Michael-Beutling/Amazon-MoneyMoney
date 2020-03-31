@@ -57,6 +57,7 @@ local config={
   cleanCookies=false,
   cleanOrdersCache=false,
   cleanFilterCache=false,
+  cleanInvalidCache=false,
   debug=false,
   splitQty=1,
   fixEncoding='latin1',
@@ -117,6 +118,7 @@ if LocalStorage ~=nil then
     LocalStorage.OrderCache={}
     LocalStorage.orderFilterCache={}
     LocalStorage.cacheVersion = cacheVersion
+    LocalStorage.invalidCache={}
   end
 
   if config['cleanOrdersCache'] and LocalStorage ~=nil then
@@ -131,6 +133,13 @@ if LocalStorage ~=nil then
     configDirty=true
     print("clean filter cache...")
     LocalStorage.orderFilterCache={}
+  end
+
+  if config['cleanInvalidCache']  then
+    config['cleanInvalidCache']=false
+    configDirty=true
+    print("clean invalid cache...")
+    LocalStorage.invalidCache={}
   end
 
   if config['cleanCookies']  then
@@ -574,6 +583,10 @@ function RefreshAccount (account, since)
     LocalStorage.orderFilterCache={}
   end
 
+  if LocalStorage.invalidCache == nil then
+    LocalStorage.invalidCache={}
+  end
+
   local orders={}
   local numOfOrders=0
   local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
@@ -643,8 +656,8 @@ function RefreshAccount (account, since)
           if orderCode ~= "" then
             -- order cached?
             if  LocalStorage.OrderCache[orderCode] == nil and orders[orderCode] == nil then
-              if config['debug'] then print("new order="..orderCode,'No='..numOfOrders) end
               numOfOrders=numOfOrders+1
+              if config['debug'] then print("new order="..orderCode,'No='..numOfOrders) end
               orders[orderCode]=url
               foundNewOrders=true
             end
@@ -675,90 +688,95 @@ function RefreshAccount (account, since)
   end
 
   numOfOrders=0
-  local invaildOrder=''
+
   local transactions={}
   -- get order details from order details page
   for orderCode,orderUrl in pairs(orders) do
+    local invaildOrder=true
     numOfOrders=numOfOrders+1
     html=connectShop("GET",orderUrl)
-    if html:xpath('//div[@id="orderDetails"]'):text() == "" then
-      if invaildOrder == '' then
-        invaildOrder=orderCode
+    if html:xpath('//div[@id="orderDetails"]'):text() ~= "" then
+      local orderDate = html:xpath('//span[@class="order-date-invoice-item"]'):text()
+      if orderDate == "" then
+        orderDate = html:xpath('//span[@class="a-color-secondary value"]'):text()
       end
-      break
-    end
-    local orderDate = html:xpath('//span[@class="order-date-invoice-item"]'):text()
-    if orderDate == "" then
-      orderDate = html:xpath('//span[@class="a-color-secondary value"]'):text()
-      if config['debug'] then
-        invaildOrder=orderCode
+      print(numOfOrders..'/'..maxOrders,'orderCode='..orderCode,'orderDate='..orderDate)
+      if orderDate ~= "" then
+        local orderSum=invalidPrice
+        html:xpath('//span[contains(@class,"a-text-bold")]'):each(function (index,element)
+          orderSum=getPrice(element:text())
+          return orderSum==invalidPrice
+        end)
+        local bookingDate=getDate(orderDate)
+        if bookingDate>0 and orderSum ~= invalidPrice then
+          local orderPositions={}
+          local total=0
+          for k,position in ipairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
+            position:each(function (index,element)
+              local purpose=removeSpaces(element:xpath('../..//a'):text())
+              local amount=getPrice(element:text())
+              local qty=1
+              if nodeExists(element,'../../..//span[@class="item-view-qty"]') then
+                qty=getQty(element:xpath('../../..//span[@class="item-view-qty"]'):text())
+              end
+              --print(purpose,amount)
+              table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
+              total=total+amount*qty
+              return true
+            end)
+          end
+          if #orderPositions >0 then
+            LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
+            invaildOrder=false
+          end
+        end
       end
-    end
-    print(numOfOrders..'/'..maxOrders,'orderCode='..orderCode,'orderDate='..orderDate)
-    if orderDate ~= "" then
-      local orderSum=invalidPrice
-      html:xpath('//span[contains(@class,"a-text-bold")]'):each(function (index,element)
-        orderSum=getPrice(element:text())
-        return orderSum==invalidPrice
-      end)
-      local bookingDate=getDate(orderDate)
-      if bookingDate>0 and orderSum ~= invalidPrice then
-        local orderPositions={}
-        local total=0
-        for k,position in ipairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
-          position:each(function (index,element)
-            local purpose=removeSpaces(element:xpath('../..//a'):text())
-            local amount=getPrice(element:text())
-            local qty=1
-            if nodeExists(element,'../../..//span[@class="item-view-qty"]') then
-              qty=getQty(element:xpath('../../..//span[@class="item-view-qty"]'):text())
-            end
-            --print(purpose,amount)
-            table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
-            total=total+amount*qty
-            return true
-          end)
-        end
-        if #orderPositions >0 then
-          LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
-          --print("store="..orderCode)
-        end
 
+      if numOfOrders >= config['maxOrdersToRead'] then
+        print('maximal orders to read limit of',config['maxOrdersToRead'],'reached!')
+        table.insert(transactions,{
+          name="Warning, max order limit reached.",
+          amount = 0,
+          bookingDate = os.time(),
+          purpose = string.format('Please reload the account to get the next %d orders.',config['maxOrdersToRead']),
+          booked=false,
+        })
+        break
+      end
+    end
+    if invaildOrder then
+      if LocalStorage.invalidCache[orderCode]== nil then
+        LocalStorage.invalidCache[orderCode]=3
+      end
+      if LocalStorage.invalidCache[orderCode] > 0 then
+        print("can't parse order details",orderCode,"reportConuter=",LocalStorage.invalidCache[orderCode])
+        table.insert(transactions,{
+          name=orderCode,
+          amount = 0,
+          bookingDate = os.time(),
+          purpose = "Warning: Can't parse the order details, a account reload can be fix it.",
+          booked=false,
+        })
+        LocalStorage.invalidCache[orderCode]=LocalStorage.invalidCache[orderCode]-1
       else
-        invaildOrder=orderCode
+        LocalStorage.invalidCache[orderCode]= nil
+        LocalStorage.OrderCache[orderCode]={orderSum=0,
+          total=0,since=since,bookingDate=os.time(),
+          orderPositions={
+            [1]={purpose="Error: Can't parse the order details for order "..orderCode.."!",
+              amount=0,qty=1
+            }
+          }
+        }
       end
-    else
-      invaildOrder=orderCode
     end
-
-    if numOfOrders >= config['maxOrdersToRead'] then
-      print('maximal orders to read limit of',config['maxOrdersToRead'],'reached!')
-      table.insert(transactions,{
-        name="Warning, max order limit reached.",
-        amount = 0,
-        bookingDate = os.time(),
-        purpose = string.format('Please reload the account to get the next %d orders.',config['maxOrdersToRead']),
-        booked=false,
-      })
-      break
-    end
-  end
-
-
-  if invaildOrder ~='' then
-    table.insert(transactions,{
-      name=invaildOrder,
-      amount = 0,
-      bookingDate = os.time(),
-      purpose = 'Error: Invalid order found, a account reload can be fix it.',
-      booked=false,
-    })
   end
 
   local balance=0
-  --since=0
+
   for orderCode,order in pairs(LocalStorage.OrderCache) do
     balance=balance+order.orderSum
+
     if order.orderSum ~= order.total then
       table.insert(transactions,{
         name=orderCode,
@@ -768,6 +786,7 @@ function RefreshAccount (account, since)
         booked=not webCache
       })
     end
+
     if order.since >= since then
       for index,position in pairs(order.orderPositions) do
         local rQty=1
@@ -787,7 +806,8 @@ function RefreshAccount (account, since)
           })
         end
       end
-      if mixed then
+
+      if mixed and order.orderSum ~= 0 then
         table.insert(transactions,{
           name=orderCode,
           amount = order.orderSum/divisor*-1,
