@@ -30,7 +30,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=1
+local cacheVersion=2
 
 local config={
   str2date = {
@@ -385,8 +385,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
         print("webcache on")
-        LocalStorage.OrderCache={}
-        LocalStorage.orderFilterCache={}
+        -- LocalStorage.OrderCache={}
+        -- LocalStorage.orderFilterCache={}
       end
     end
     html = connectShop("GET",baseurl)
@@ -677,7 +677,6 @@ function RefreshAccount (account, since)
         --print("orderFilter="..orderFilterVal.." cached")
       end
     end
-    --print("new orders="..#orders)
     return numOfOrders<config['maxOrdersToRead']
   end)
 
@@ -761,7 +760,7 @@ function RefreshAccount (account, since)
       else
         LocalStorage.invalidCache[orderCode]= nil
         LocalStorage.OrderCache[orderCode]={orderSum=0,
-          total=0,since=since,bookingDate=os.time(),
+          total=0,since=since,bookingDate=os.time(),report=2,
           orderPositions={
             [1]={purpose="Error: Can't parse the order details for order "..orderCode.."!",
               amount=0,qty=1
@@ -786,8 +785,16 @@ function RefreshAccount (account, since)
         booked=not webCache
       })
     end
-
-    if order.since >= since then
+    
+    local report=true
+    if order.report~=nil then
+      if order.report >0 then
+        order.report=order.report-1
+      else
+         report=false
+      end
+    end
+    if order.since >= since and report then
       for index,position in pairs(order.orderPositions) do
         local rQty=1
         local mQty=1
