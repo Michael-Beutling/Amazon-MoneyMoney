@@ -381,6 +381,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     captcha1run=true
     mfa1run=true
     aName=nil
+
+    -- issue5
+    LocalStorage.orderFilterCache={}
+
     if config['debug'] then
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
@@ -589,6 +593,10 @@ function RefreshAccount (account, since)
 
   local orders={}
   local numOfOrders=0
+
+  -- issue5
+  local countOrders={}
+
   local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
   orderFilterSelect:each(function(index,element)
     local orderFilterVal=element:attr('value')
@@ -598,6 +606,10 @@ function RefreshAccount (account, since)
       --print(orderFilterVal)
       html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
       html=connectShop(html:xpath('//*[@id="timePeriodForm"]'):submit())
+
+      --issue5
+      countOrders[orderFilterVal]={counts=0,text=html:xpath('//span[@class="num-orders"]'):text()}
+
       local foundEnd=false
       repeat
         -- get order details from overview when possible
@@ -654,6 +666,10 @@ function RefreshAccount (account, since)
           local url=orderLink:attr('href')
           local orderCode=string.match(url,'orderID=([%d-]+)')
           if orderCode ~= "" then
+          
+            -- issue5
+            countOrders[orderFilterVal].counts=countOrders[orderFilterVal].counts+1
+          
             -- order cached?
             if  LocalStorage.OrderCache[orderCode] == nil and orders[orderCode] == nil then
               numOfOrders=numOfOrders+1
@@ -830,6 +846,15 @@ function RefreshAccount (account, since)
     balance=0
   end
 
+  -- issue5
+  countOrders['last30']=nil
+  countOrders['months-6']=nil
+  numOfOrders=0
+  for orderFilterVal,x in pairs(countOrders) do
+    print("orderFilterVal="..orderFilterVal," counts=",x.counts,"text=",x.text)
+    numOfOrders=numOfOrders+x.counts
+  end
+  print("total=",numOfOrders)
   -- Return balance and array of transactions.
   return {balance=balance/divisor, transactions=transactions}
 end
