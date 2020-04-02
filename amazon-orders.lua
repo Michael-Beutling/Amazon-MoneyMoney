@@ -650,7 +650,7 @@ function RefreshAccount (account, since)
           end
         end)
         -- get all order details urls
-        html:xpath('//a[contains(@href,"order-details")]'):each(function(index,orderLink)
+        html:xpath('//a[contains(@href,"order-details") and @class="a-link-normal"]'):each(function(index,orderLink)
           local url=orderLink:attr('href')
           local orderCode=string.match(url,'orderID=([%d-]+)')
           if orderCode ~= "" then
