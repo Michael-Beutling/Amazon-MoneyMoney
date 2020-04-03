@@ -31,7 +31,6 @@ local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
 local cacheVersion=2
-local logoutElement=nil
 
 local config={
   str2date = {
@@ -838,9 +837,12 @@ end
 function EndSession ()
   -- Logout.
   if config['reallyLogout'] then
-    local logoutElement=html:xpath('//a[@id="nav-item-signout"]')
+    local logoutElement=html:xpath('//a[contains(@href,"sign-out")]')
     if logoutElement ~= nil then
-      html= connectShop(logoutElement:click())
+      print("Logout")
+      if logoutElement:click() ~= nil then
+        html= connectShop(logoutElement:click())
+      end
     else
       print("error: logout link not found")
     end
