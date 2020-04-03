@@ -501,7 +501,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   enterCredentials('after passcode')
 
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
-    aName=html:xpath('//span[@class="nav-line-3"]'):text()
+    aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
       aName="Unkown"
       -- print("can't get username, new layout?")
