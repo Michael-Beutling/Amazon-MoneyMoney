@@ -837,7 +837,12 @@ end
 function EndSession ()
   -- Logout.
   if config['reallyLogout'] then
-    html= connectShop(html:xpath('//a[contains(@href,"signout")]'):click())
+    local logoutElement=html:xpath('//a[@id="nav-item-signout"]')
+    if logoutElement == nil then
+      html= connectShop(logoutElement:click())
+    else
+      print("error: logout link not found")
+    end
   end
 end
 
