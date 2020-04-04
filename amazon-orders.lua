@@ -346,15 +346,17 @@ function RegressionTest.run(transactions)
     if transFile ~= nil then
 
       print("run regression test")
+      
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
 
+      local transFile=io.open("transactions.json","wb")
       local now=RegressionTest.makeRows(transactions)
-      if RegressionTest.compareTrees(now,master) then
-        local transFile=io.open("transactions.json","wb")
-        transFile:write(JSON():set(now):json())
-        transFile.close()
-      end 
+      transFile:write(JSON():set(now):json())
+      transFile.close()
+      
+
+      RegressionTest.compareTrees(now,master)
       print("regression test finish")
     end
   end
