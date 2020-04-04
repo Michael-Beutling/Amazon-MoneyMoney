@@ -463,8 +463,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
         print("webcache on")
-        -- LocalStorage.OrderCache={}
-        -- LocalStorage.orderFilterCache={}
+        LocalStorage.OrderCache={}
+        LocalStorage.orderFilterCache={}
       end
     end
     html = connectShop("GET",baseurl)
@@ -688,6 +688,7 @@ function RefreshAccount (account, since)
       repeat
         -- get order details from overview when possible
         html:xpath('//div[contains(@class,"a-box-group")]'):each(function (index,element)
+          -- link present for details = shorted overview -> skip
           if element:xpath('.//div[contains(@class,"shipment")]//a[contains(@href,"order-details")]'):text()=='' then
             local headData={}
             element:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
@@ -701,24 +702,35 @@ function RefreshAccount (account, since)
                     --print(bookingDate,orderSum,orderCode)
                     local vaildOrder=true
                     local orderPositions={}
-                    local total=0
-                    element:xpath('.//div[@class="a-row"]/a[contains(@href,"/gp/product/")]/../..'):each(function (index,element)
-                      --print(element:xpath('.//a[contains(@href,"/gp/product/")]'):text(),element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
+                    element:xpath('.//div[@class="a-fixed-left-grid-inner"]'):each(function (index,element)
                       local qty=1
-                      local purpose=removeSpaces(element:xpath('.//a[contains(@href,"/gp/product/")]'):text())
+                      local purpose=removeSpaces(element:xpath('.//div[@class="a-fixed-left-grid-col a-col-right"]/descendant::div[@class="a-row"][1]'):text())
                       local amount=getPrice(element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
-                      if nodeExists(element,'..//span[@class="item-view-qty"]') then
-                        qty=getQty(element:xpath('..//span[@class="item-view-qty"]'):text())
+                      if nodeExists(element,'.//span[@class="item-view-qty"]') then
+                        qty=getQty(element:xpath('.//span[@class="item-view-qty"]'):text())
                       end
-                      if purpose ~= nil and amount ~= invalidPrice and qty~= invalidQty then
+
+                      if purpose ~= nil and qty~= invalidQty then
                         table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
-                        total=total+amount*qty
                       else
                         vaildOrder=false
                         print("found invalid position in order",orderCode)
                       end
                       return vaildOrder
                     end)
+
+                    if #orderPositions == 1 and orderPositions[1].amount == invalidPrice then
+                      -- can be a digital article
+                      orderPositions[1].amount = orderSum
+                    end
+
+                    local total=0
+                    for _,v in pairs(orderPositions) do
+                      if v.amount == invalidPrice then
+                        vaildOrder=false
+                      end
+                      total=total+v.amount*v.qty
+                    end
 
                     if vaildOrder and #orderPositions>0 then
                       LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
