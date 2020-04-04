@@ -288,6 +288,77 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   return content,charset
 end
 
+local RegressionTest={}
+
+function RegressionTest.makeRows(transactions)
+  local rows={}
+  for _,transaction in pairs(transactions) do
+    for k,v in pairs(transaction) do
+      if k ~= 'name' then
+        local row=transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'"
+        if rows[row]==nil then
+          rows[row]=1
+        else
+          rows[row]=rows[row]+1
+        end
+      end
+    end
+  end
+  return rows
+end
+
+function RegressionTest.compareTrees(now,master)
+  local differences=0
+  for k,v in pairs(master) do
+    if now[k] ~= nil then
+      now[k]=now[k]-v
+      master[k]=0
+    end
+  end
+  for k,v in pairs(now) do
+    if master[k] ~= nil then
+      master[k]=master[k]-v
+      now[k]=0
+    end
+  end
+  print("differences master")
+  for k,v in pairs(master) do
+    if v ~=0 then
+      print("n="..v," value="..k)
+      differences=differences+1
+    end
+  end
+  print("differences now")
+  for k,v in pairs(now) do
+    if v ~=0 then
+      print("n="..v," value="..k)
+      differences=differences+1
+    end
+  end
+  print("differences="..differences)
+  return differences~=0
+end
+
+function RegressionTest.run(transactions)
+  if io ~= nil then
+    transFile=io.open("transactions_master.json",'rb')
+    if transFile ~= nil then
+
+      print("run regression test")
+      local master=JSON(transFile:read('*all')):dictionary()
+      transFile.close()
+
+      local now=RegressionTest.makeRows(transactions)
+      if RegressionTest.compareTrees(now,master) then
+        local transFile=io.open("transactions.json","wb")
+        transFile:write(JSON():set(now):json())
+        transFile.close()
+      end 
+      print("regression test finish")
+    end
+  end
+end
+
 function getDate(text)
   if type(text)~='string' then
     return false
@@ -855,6 +926,7 @@ function RefreshAccount (account, since)
     numOfOrders=numOfOrders+x.counts
   end
   print("total=",numOfOrders)
+  RegressionTest.run(transactions)
   -- Return balance and array of transactions.
   return {balance=balance/divisor, transactions=transactions}
 end
