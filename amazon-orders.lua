@@ -33,6 +33,7 @@ local invalidQty=1e99
 local cacheVersion=2
 
 local config={
+  regexOrderCode="(D?%d+%-%d+%-%d+)",
   str2date = {
     Januar=1,
     Februar=2,
@@ -406,7 +407,7 @@ function isOrderCode(text)
   if type(text)~='string' then
     return false
   end
-  local orderCode=string.match(text,"(%d+%-%d+%-%d+)")
+  local orderCode=string.match(text,config.regexOrderCode)
   return orderCode ~= nil
 end
 
@@ -414,7 +415,7 @@ function getOrderCode(text)
   if type(text)~='string' then
     return nil
   end
-  local orderCode=string.match(text,"(%d+%-%d+%-%d+)")
+  local orderCode=string.match(text,config.regexOrderCode)
   return orderCode
 end
 
@@ -735,7 +736,7 @@ function RefreshAccount (account, since)
         -- get all order details urls
         html:xpath('//a[contains(@href,"order-details") and @class="a-link-normal"]'):each(function(index,orderLink)
           local url=orderLink:attr('href')
-          local orderCode=string.match(url,'orderID=([%d-]+)')
+          local orderCode=string.match(url,'orderID='..config.regexOrderCode)
           if orderCode ~= "" then
           
             -- issue5
