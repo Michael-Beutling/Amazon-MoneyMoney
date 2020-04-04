@@ -90,7 +90,7 @@ local configFileName='amazon_orders.json'
 local configFile=nil
 -- io=nil
 -- io.open=nil
--- signed version has no io.open functions 
+-- signed version has no io.open functions
 if io ~= nil and io.open ~= nil then
   configFile=io.open(configFileName,"rb")
 end
@@ -361,7 +361,7 @@ function getDate(text)
   if month ~= nil then
     return os.time({year=year,month=month,day=day})
   end
-  error(text)
+  --error(text)
   return invalidDate -- error value
 end
 
@@ -667,36 +667,45 @@ function RefreshAccount (account, since)
             element:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
               headData[index]=element:text()
             end)
-            local bookingDate,orderSum,orderCode=getDate(headData[1]),getPrice(headData[2]),getOrderCode(headData[3])
-            if orderCode ~= nil then
-              if orderSum ~= invalidPrice then
-                if bookingDate >0 then
-                  --print(bookingDate,orderSum,orderCode)
-                  local vaildOrder=true
-                  local orderPositions={}
-                  local total=0
-                  element:xpath('.//div[@class="a-row"]/a[contains(@href,"/gp/product/")]/../..'):each(function (index,element)
-                    --print(element:xpath('.//a[contains(@href,"/gp/product/")]'):text(),element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
-                    local qty=1
-                    local purpose=removeSpaces(element:xpath('.//a[contains(@href,"/gp/product/")]'):text())
-                    local amount=getPrice(element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
-                    if nodeExists(element,'..//span[@class="item-view-qty"]') then
-                      qty=getQty(element:xpath('..//span[@class="item-view-qty"]'):text())
-                    end
-                    if purpose ~= nil and amount ~= invalidPrice and qty~= invalidQty then
-                      table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
-                      total=total+amount*qty
-                    else
-                      vaildOrder=false
-                    end
-                    return vaildOrder
-                  end)
+            if #headData == 3 then
+              local bookingDate,orderSum,orderCode=getDate(headData[1]),getPrice(headData[2]),getOrderCode(headData[3])
+              if orderCode ~= nil then
+                if orderSum ~= invalidPrice then
+                  if bookingDate >0 and bookingDate ~= invalidDate then
+                    --print(bookingDate,orderSum,orderCode)
+                    local vaildOrder=true
+                    local orderPositions={}
+                    local total=0
+                    element:xpath('.//div[@class="a-row"]/a[contains(@href,"/gp/product/")]/../..'):each(function (index,element)
+                      --print(element:xpath('.//a[contains(@href,"/gp/product/")]'):text(),element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
+                      local qty=1
+                      local purpose=removeSpaces(element:xpath('.//a[contains(@href,"/gp/product/")]'):text())
+                      local amount=getPrice(element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
+                      if nodeExists(element,'..//span[@class="item-view-qty"]') then
+                        qty=getQty(element:xpath('..//span[@class="item-view-qty"]'):text())
+                      end
+                      if purpose ~= nil and amount ~= invalidPrice and qty~= invalidQty then
+                        table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
+                        total=total+amount*qty
+                      else
+                        vaildOrder=false
+                        print("found invalid position in order",orderCode)
+                      end
+                      return vaildOrder
+                    end)
 
-                  if vaildOrder and #orderPositions>0 then
-                    LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
+                    if vaildOrder and #orderPositions>0 then
+                      LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
+                    end
+                  else
+                    print("no date found for order",orderCode,"found='"..tostring(headData[1]).."'")
                   end
+                else
+                  print("no valid sum found for order", orderCode, "found='"..tostring(headData[2]).."'")
                 end
               end
+            else
+              print("skip order, get wrong number of elements date='"..tostring(headData[1]).."' sum='"..tostring(headData[2]).."' code='"..tostring(headData[3]).."'")
             end
           end
         end)
