@@ -30,7 +30,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=5
+local cacheVersion=6
 
 local config={
   regexOrderCode="(D?%d+%-%d+%-%d+)",
@@ -860,7 +860,10 @@ function RefreshAccount (account, since)
             local bookingDate=getDate(element:xpath('//span[@class="a-size-small a-color-secondary"]//font/../..'):text())
             print(qty,purpose,amount,bookingDate)
             if qty ~= invalidQty and amount ~=invalidPrice and bookingDate ~=invalidDate then
-              table.insert(returnedArticles,{qty=qty,purpose=purpose,amount=amount,bookingDate=bookingDate})
+              local k=MM.md5(table.concat({qty,purpose,amount,bookingDate},"\t"))
+              if returnedArticles[k]== nil then
+                returnedArticles[k]={qty=qty,purpose=purpose,amount=amount,bookingDate=bookingDate,since=since}
+              end
             end
           end)
         end
@@ -999,44 +1002,46 @@ function RefreshAccount (account, since)
       end
     end
     if order.returnedArticles ~= nil then
-      for index,position in pairs(order.returnedArticles) do
-        local rQty=1
-        local mQty=1
-        local purpose=position.purpose
-        if purpose:sub(-3) == '...' then
-          local founds=0
-          for i,p in pairs(order.orderPositions) do
-            if p.purpose:sub(1,#position.purpose-3)==position.purpose:sub(1,#position.purpose-3) then
-              founds=founds+1
-              purpose=p.purpose
+      for _,position in pairs(order.returnedArticles) do
+        if position.since>=since then
+          local rQty=1
+          local mQty=1
+          local purpose=position.purpose
+          if purpose:sub(-3) == '...' then
+            local founds=0
+            for i,p in pairs(order.orderPositions) do
+              if p.purpose:sub(1,#position.purpose-3)==position.purpose:sub(1,#position.purpose-3) then
+                founds=founds+1
+                purpose=p.purpose
+              end
+            end
+            if founds >1 then
+              purpose=position.purpose
             end
           end
-          if founds >1 then
-            purpose=position.purpose
+          if position.qty> config['splitQty'] then
+            mQty=position.qty
+          else
+            rQty=position.qty
           end
-        end
-        if position.qty> config['splitQty'] then
-          mQty=position.qty
-        else
-          rQty=position.qty
-        end
-        for i=1,rQty,1 do
-          table.insert(transactions,{
-            name=orderCode,
-            amount = position.amount/divisor*mQty*-1,
-            bookingDate = position.bookingDate+1,
-            purpose = config.refund..MM.toEncoding(config['fixEncoding'],purpose),
-            booked=not webCache
-          })
-        end
-        if mixed then
-          table.insert(transactions,{
-            name=orderCode,
-            amount = (position.amount*position.qty)/divisor,
-            bookingDate = position.bookingDate,
-            purpose = config.refundContra..purpose,
-            booked=not webCache
-          })
+          for i=1,rQty,1 do
+            table.insert(transactions,{
+              name=orderCode,
+              amount = position.amount/divisor*mQty*-1,
+              bookingDate = position.bookingDate+1,
+              purpose = config.refund..MM.toEncoding(config['fixEncoding'],purpose),
+              booked=not webCache
+            })
+          end
+          if mixed then
+            table.insert(transactions,{
+              name=orderCode,
+              amount = (position.amount*position.qty)/divisor,
+              bookingDate = position.bookingDate,
+              purpose = config.refundContra..purpose,
+              booked=not webCache
+            })
+          end
         end
       end
     end
