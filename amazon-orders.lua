@@ -448,7 +448,6 @@ function getReturnHistory()
       orderIDs[getOrderCode(url)]=false
     end
   end)
-  orderIDs['303-4953190-5470706']=false
   return orderIDs;
 end
 
@@ -651,6 +650,7 @@ end
 
 function RefreshAccount (account, since)
   local mixed=false
+  --since=os.time()
   webCacheState='RefreshAccount'
 
   local divisor=-100
@@ -738,7 +738,7 @@ function RefreshAccount (account, since)
             end)
             if #headData == 3 then
               local bookingDate,orderSum,orderCode=getDate(headData[1]),getPrice(headData[2]),getOrderCode(headData[3])
-              if orderCode ~= nil then
+              if orderCode ~= nil and LocalStorage.OrderCache[orderCode] == nil then
                 if orderSum ~= invalidPrice then
                   if bookingDate >0 and bookingDate ~= invalidDate then
                     --print(bookingDate,orderSum,orderCode)
@@ -850,7 +850,11 @@ function RefreshAccount (account, since)
         local url=(element:attr("href")),element:attr("href")
         if getOrderCode(url) == orderCode then
           print("detect return")
-          returnedArticles={}
+          if LocalStorage.OrderCache[orderCode] ~=nil and LocalStorage.OrderCache[orderCode].returnedArticles ~= nil then
+            returnedArticles=LocalStorage.OrderCache[orderCode].returnedArticles
+          else
+            returnedArticles={}
+          end
           local returnPage=connectShop(element:click())
           -- returned items:
           returnPage:xpath('//div[@id="-returnable-item"]'):each(function (index,element)
@@ -953,7 +957,14 @@ function RefreshAccount (account, since)
   for orderCode,order in pairs(LocalStorage.OrderCache) do
     balance=balance+order.orderSum
 
-    if order.orderSum ~= order.total then
+    if order.returnedArticles ~= nil then
+      for _,position in pairs(order.returnedArticles) do
+        balance=balance+ position.amount/divisor*position.qty*-1
+      end
+    end
+
+
+    if order.orderSum ~= order.total and order.since >= since then
       table.insert(transactions,{
         name=orderCode,
         amount = (order.orderSum-order.total)/divisor,
