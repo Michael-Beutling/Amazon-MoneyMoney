@@ -941,7 +941,9 @@ function RefreshAccount (account, since)
     numOfOrders=numOfOrders+x.counts
   end
   print("total=",numOfOrders)
+
   RegressionTest.run(transactions)
+
   -- Return balance and array of transactions.
   return {balance=balance/divisor, transactions=transactions}
 end
