@@ -1,7 +1,12 @@
 # Amazon Plugin for MoneyMoney
 ## Installation
 copy *amazon-orders.lua* script in the *~/Library/Containers/com.moneymoney-app.retail/Data/Library/Application\ Support/MoneyMoney/Extensions* Folder or run the *link_ext.sh* script in a shell.
-Don't forget, MoneyMoney run unsigned plugin only in the beta version and when You disable the signature check in the extentsion settings.
+
+**Look out:** MoneyMoney only runs unsigned plugins in the **beta version** and you need to **disable signature check** in the extentsion settings.
+After installation go to *add new account* - *others* - *Amazon Orders*.
+Normal will list your spendings like a normal account.
+Inverted will have your spendings with positive values.
+Mixed will show a positive booking for every position, so the total adds up to Zero.
 
 ## Config
 Only for unsigned version:
