@@ -30,10 +30,22 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=6
+local cacheVersion=7
+local debugBuffer={}
+local webCacheLastId=nil
 
 local config={
-  regexOrderCode="(D?%d+%-%d+%-%d+)",
+  configOk=true,
+  reallyLogout=true,
+  cleanCookies=false,
+  cleanOrdersCache=false,
+  cleanFilterCache=false,
+  cleanInvalidCache=false,
+  debug=false,
+}
+
+local const={
+  regexOrderCodeNew="([D%d]%d%d%-%d%d%d%d%d%d%d%-%d%d%d%d%d%d%d)",
   str2date = {
     Januar=1,
     Februar=2,
@@ -49,20 +61,13 @@ local config={
     Dezember=12
   },
   domain='.amazon.de',
-  configOk=true,
   services    = {"Amazon Orders"},
   description = "Give you a overview about your amazon orders.",
   contra="Amazon contra ",
-  refundContra="Refund contra for ",
-  refund="Refund for ",
-  reallyLogout=true,
-  maxOrdersToRead=250,
-  cleanCookies=false,
-  cleanOrdersCache=false,
-  cleanFilterCache=false,
-  cleanInvalidCache=false,
-  debug=false,
-  splitQty=1,
+  returnText="Returned item: ",
+  returnTextContra="Amazon contra returned item: ",
+  refundTransaction="Refund for order ",
+  refundTransactionContra="Amazon contra refund for order ",
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
 }
@@ -121,32 +126,31 @@ if LocalStorage ~=nil then
     LocalStorage.OrderCache={}
     LocalStorage.orderFilterCache={}
     LocalStorage.cacheVersion = cacheVersion
-    LocalStorage.invalidCache={}
   end
 
-  if config['cleanOrdersCache'] and LocalStorage ~=nil then
-    config['cleanOrdersCache']=false
+  if config.cleanOrdersCache and LocalStorage ~=nil then
+    config.cleanOrdersCache=false
     configDirty=true
     print("clean orders cache...")
     LocalStorage.OrderCache={}
   end
 
-  if config['cleanFilterCache']  then
-    config['cleanFilterCache']=false
+  if config.cleanFilterCache  then
+    config.cleanFilterCache=false
     configDirty=true
     print("clean filter cache...")
     LocalStorage.orderFilterCache={}
   end
 
-  if config['cleanInvalidCache']  then
-    config['cleanInvalidCache']=false
+  if config.cleanInvalidCache  then
+    config.cleanInvalidCache=false
     configDirty=true
     print("clean invalid cache...")
     LocalStorage.invalidCache={}
   end
 
-  if config['cleanCookies']  then
-    config['cleanCookies']=false
+  if config.cleanCookies then
+    config.cleanCookies=false
     configDirty=true
     print("clean cookies...")
     LocalStorage.cookies=nil
@@ -161,22 +165,71 @@ if configDirty and io ~= nil and io.open ~= nil then
   io.close(configFile)
 end
 
-print(((io == nil or io.open == nil) and 'signed ' or '')  .. config['services'][1],"plugin loaded...")
-if config['debug'] then print('debugging...') end
+print(((io == nil or io.open == nil) and 'signed ' or '')  .. const.services[1],"plugin loaded...")
+if config.debug then print('debugging...') end
 
-local baseurl='https://www'..config['domain']
+local baseurl='https://www'..const.domain
 
 WebBanking{version  = 1.07,
   url         = baseurl,
-  services    = config['services'],
-  description = config['description']}
+  services    = const.services,
+  description = const.description}
 
+function debugBuffer.tablePrint(tbl)
+  local t={}
+  for k,v in pairs(tbl) do
+    if type(v)=='table' then
+      table.insert(t,k.."(#table)={"..debugBuffer.tablePrint(v).."}")
+    else
+      table.insert(t,k.."#"..type(v).."='"..tostring(v).."'")
+    end
+  end
+  return table.concat(t,",")
+end
+
+function debugBuffer.print(...)
+  local args={}
+  for _,v in pairs({...}) do
+    local n
+    if type(v)=='table' then
+      n=type(v).."='"..debugBuffer.tablePrint(v).."'"
+    else
+      n=type(v).."='"..tostring(v).."'"
+    end
+    table.insert(args,n)
+  end
+  table.insert(debugBuffer,table.concat(args," "))
+end
+
+function debugBuffer.flush()
+  for i,v in ipairs(debugBuffer) do
+    print(v)
+    debugBuffer[i]=nil
+  end
+
+end
+
+function removeWebCacheLastItem()
+  if webCache then
+    os.remove(webCacheFolder..'/'..webCacheLastId..'.html')
+    os.remove(webCacheFolder..'/'..webCacheLastId..'.json')
+    print("remove",webCacheLastId,"from webCache")
+  end
+end
 
 function connectShop(method, url, postContent, postContentType, headers)
   if method == nil then
     return nil
   end
   return HTML(connectShopRaw(method, url, postContent, postContentType, headers))
+end
+
+function connectShopJson(method, url, postContent, postContentType, headers)
+  if method == nil then
+    return nil
+  end
+  headers={["X-Requested-With"]="XMLHttpRequest" }
+  return JSON(connectShopRaw(method, url, postContent, postContentType, headers)):dictionary()
 end
 
 function connectShopRaw(method, url, postContent, postContentType, headers)
@@ -191,7 +244,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   end
 
   if method == 'POST' then
-    if config['debug'] then
+    if config.debug then
       for i in string.gmatch(postContent, "([^&]+)") do
         print("post='"..i.."'")
       end
@@ -206,7 +259,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
       for i in string.gmatch(LocalStorage.cookies, '([^; ]+)') do
         if  i:sub(1, #'ap-fid=') ~= 'ap-fid=' and i:sub(-#'=deleted') ~= '=deleted' then
           -- print("keep cookie:"..i)
-          connection:setCookie(i..'; Domain='..config['domain']..'; Expires=Tue, 01-Jan-2036 08:00:01 GMT; Path=/')
+          connection:setCookie(i..'; Domain='..const.domain..'; Expires=Tue, 01-Jan-2036 08:00:01 GMT; Path=/')
         else
         -- print("suppress cockie:"..i)
         end
@@ -216,15 +269,16 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
 
   local cached=false
   local content, charset, mimeType, filename, headers
-  local id
+  local writeCache=false
   if webCache then
-    id=MM.md5(tostring(method)..tostring(url)..tostring(postContent)..tostring(postContentType)..tostring(headers)..webCacheState)
-    local webFile=io.open(webCacheFolder..'/'..id..'.json','rb')
+    writeCache=true
+    webCacheLastId=MM.md5(tostring(method)..tostring(url)..tostring(postContent)..tostring(postContentType)..tostring(headers)..webCacheState)
+    local webFile=io.open(webCacheFolder..'/'..webCacheLastId..'.json','rb')
     if webFile then
       local metaJSON=webFile:read('*all')
       local meta=JSON(metaJSON):dictionary()
       webFile:close()
-      webFile=io.open(webCacheFolder..'/'..id..'.html','rb')
+      webFile=io.open(webCacheFolder..'/'..webCacheLastId..'.html','rb')
       if webFile then
         content=webFile:read('*all')
         webFile:close()
@@ -233,9 +287,11 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
         filename=meta['filename']
         headers=meta['headers']
         cached=true
-        print("webCache id="..id.." read.")
+        print("webCache id="..webCacheLastId.." read.")
         webCacheHit=true
       end
+    else
+      writeCache=false
     end
     if not cached and webCacheHit then
       error('webCache error!')
@@ -245,8 +301,8 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
 
   if not cached then
     content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
-    if webCache then
-      local webFile=io.open(webCacheFolder..'/'..id..'.json',"wb")
+    if writeCache then
+      local webFile=io.open(webCacheFolder..'/'..webCacheLastId..'.json',"wb")
       webFile:write(JSON():set({
         charset=charset,
         mimeType=mimeType,
@@ -262,19 +318,19 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
         webCacheState=webCacheState,
       }):json())
       webFile:close()
-      webFile=io.open(webCacheFolder..'/'..id..'.html',"wb")
+      webFile=io.open(webCacheFolder..'/'..webCacheLastId..'.html',"wb")
       webFile:write(content)
       webFile:close()
-      print("webCache id="..id.." written.")
+      print("webCache id="..webCacheLastId.." written.")
     end
   end
 
   if not cached and baseurl == connection:getBaseURL():lower():sub(1,#baseurl)  then
     -- work around for deleted cookies, prevent captcha
-    connection:setCookie('a-ogbcbff=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
-    connection:setCookie('ap-fid=; Domain='..config['domain']..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/ap/; Secure')
+    connection:setCookie('a-ogbcbff=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
+    connection:setCookie('ap-fid=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/ap/; Secure')
 
-    if config['debug'] then
+    if config.debug then
       if LocalStorage.cookies~=connection:getCookies() then
         print("store cookies=",connection:getCookies())
       end
@@ -287,7 +343,7 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
     end
     LocalStorage.cookies=connection:getCookies()
   else
-    if config['debug'] then print("skip cookie saving") end
+  -- if config.debug then print("skip cookie saving") end
   end
 
   return content,charset
@@ -341,12 +397,12 @@ function RegressionTest.compareTrees(now,master)
     end
   end
   print("differences="..differences)
-  return differences~=0
+  return differences
 end
 
-function RegressionTest.run(transactions)
+function RegressionTest.run(transactions,regTestPre)
   if io ~= nil then
-    local transFile=io.open("transactions_master.json",'rb')
+    local transFile=io.open(regTestPre.."_transactions_master.json",'rb')
     if transFile ~= nil then
 
       print("run regression test")
@@ -354,16 +410,40 @@ function RegressionTest.run(transactions)
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
 
-      local transFile=io.open("transactions.json","wb")
+      local transFile=io.open(regTestPre.."_transactions.json","wb")
       local now=RegressionTest.makeRows(transactions)
       transFile:write(JSON():set(now):json())
       transFile.close()
 
 
-      RegressionTest.compareTrees(now,master)
+      local num=RegressionTest.compareTrees(now,master)
       print("regression test finish")
+      table.insert(transactions,{
+        name="regression test finish",
+        amount = num,
+        bookingDate = os.time(),
+        purpose = "",
+        booked = false,
+
+      })
     end
   end
+end
+
+function connectShopWithCheck(method, url, postContent, postContentType, headers)
+  if method == nil then
+    return nil
+  end
+  local html=HTML(connectShopRaw(method, url, postContent, postContentType, headers))
+  local xpform='//form[@name="signIn"]'
+  if html:xpath(xpform):attr("name") ~= '' then
+    removeWebCacheLastItem()
+    print("Forced log out detect, enter username/password")
+    html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    html:xpath('//*[@name="password"]'):attr("value",secPassword)
+    html= connectShop(html:xpath(xpform):submit())
+  end
+  return html
 end
 
 function getDate(text)
@@ -371,7 +451,7 @@ function getDate(text)
     return invalidDate
   end
   local day,month,year=string.match(text,"(%d+)%.%s+([%S]+)%s+(%d+)")
-  local month=config['str2date'][month]
+  local month=const.str2date[month]
   if month ~= nil then
     return os.time({year=year,month=month,day=day})
   end
@@ -383,7 +463,7 @@ function getPrice(text)
   if type(text)~='string' then
     return invalidPrice
   end
-  local amountHigh,amountLow=string.match(text,"(%d+)[,%.](%d%d)")
+  local amountHigh,amountLow=string.match(text,"(%d+),(%d%d)")
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
   end
@@ -409,26 +489,11 @@ function getQtyFromElement(element)
   return qty
 end
 
-function removeSpaces(text)
-  if type(text)~='string' then
-    return nil
-  end
-  return string.match(text,"^%s*(.+)%s*$")
-end
-
-function containsOrderCode(text)
-  if type(text)~='string' then
-    return false
-  end
-  local orderCode=string.match(text,config.regexOrderCode)
-  return orderCode ~= nil
-end
-
 function getOrderCode(text)
   if type(text)~='string' then
     return nil
   end
-  local orderCode=string.match(text,config.regexOrderCode)
+  local orderCode=string.match(text,const.regexOrderCodeNew)
   return orderCode
 end
 
@@ -436,21 +501,389 @@ function nodeExists(element,xpath)
   return element:xpath(xpath)[1] ~= nil
 end
 
-function getReturnHistory()
-
-  --https://www.amazon.de/spr/returns
-  -- untested :(
-  local orderIDs={}
-  local lhtml=connectShop("GET",baseurl..'/spr/returns/history')
-  lhtml:xpath('//a[contains(@href,"orderID=") or contains(@href,"orderId=")]'):each(function (index,element)
-    local url=(element:attr("href")),element:attr("href")
-    if containsOrderCode(url) then
-      orderIDs[getOrderCode(url)]=false
-    end
-  end)
-  return orderIDs;
+function getLastElementText(html,...)
+  local elements=html:xpath(table.concat({...}))
+  if elements:length() == 0 then
+    return ''
+  end
+  return elements:get(elements:length()):text()
 end
 
+function getOrderInfosFromSummaryHeader(orderInfo,order)
+  if orderInfo:text() == "" then
+    return false
+  end
+
+  local headData={}
+
+  orderInfo:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
+    headData[index]=element:text()
+  end)
+
+  if #headData >= 3 then
+    order.bookingDate=getDate(headData[1])
+    order.orderTotal=getPrice(headData[2])
+    order.orderCode=getOrderCode(headData[3])
+
+    if order.bookingDate == invalidDate then
+      order.orderCode=nil
+      return false
+    end
+    if order.orderTotal == invalidPrice then
+      order.orderCode=nil
+    end
+  end
+
+  if order.orderCode == nil then
+    return false
+  end
+
+  order.detailsUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/order-details/")]'):attr('href')
+  if order.detailsUrl == "" then
+    order.digitalUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/digital/")]'):attr('href')
+    if order.digitalUrl == "" then
+      order.orderCode=nil
+      return false
+    end
+  end
+
+  return true
+end
+
+function isShipmentShorted(shipment)
+  return shipment:xpath('.//a[contains(@href,"/order-details/")]'):length() ~= 0
+end
+
+--- @type orderPosition
+-- @field purpose
+-- @field amount
+-- @field qty
+
+--- @type order
+-- @field #string orderCode
+-- @field #number totalSum
+-- @field #number orderTotal   total from header
+-- @field #number refund       sum of refund from header
+-- @field #number bookingDate  date of order
+-- @field #string detailsUrl
+-- @field #string digitalUrl
+-- @field #list<#orderPosition> orderPositions
+-- @field #boolean summaryShorted not all acticles in the summary shown
+-- @field #boolean invalidArticles
+-- @field #number detailsDate
+
+--- @type totals
+-- @field  #number orderTotal Sum of order showed by Amazon
+-- @field  #number refund amount of refund showed by Amazon
+
+--- @function  getTotalsFromDetails
+-- @return #totals
+--
+
+
+
+function getTotalsFromDetails(orderDetails)
+  local totals={} --#totals
+
+  local xPathPrefix=('//div[@id="od-subtotals"]//div[contains(@class,"a-span-last")]//')
+  totals.orderTotal=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[@class="a-color-base a-text-bold"]'))
+  totals.refund=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[@class="a-color-success a-text-bold"]'))
+  if totals.refund ==invalidPrice then
+    totals.refund=0
+  end
+  return totals
+
+end
+
+--- @function  getArticleFromShipment
+-- @param #string shipment
+-- @param #order order
+-- @param #boolean doInsert
+-- @return
+function getArticleFromShipment(shipment,order,doInsert)
+  doInsert=doInsert ~= false
+
+  local refund=invalidPrice
+  local refundText=shipment:xpath('.//div[@class="actions"]'):text()
+  if refundText ~=""then
+    refund=getPrice(refundText)
+    --debugBuffer.print("action",order.orderCode,doInsert,refund)
+  end
+
+  shipment:xpath('.//div[@class="a-fixed-left-grid-inner"]'):each(function(index,article)
+    local purpose
+    local amount=invalidPrice
+    local qty=getQtyFromElement(article)
+    article:xpath('.//div[@class="a-row"]'):each(function(index,row)
+      if purpose==nil then
+        purpose=row:text()
+      else
+        local price=getPrice(row:text())
+        if price~=invalidPrice then
+          amount=price
+        end
+      end
+    end) -- row
+    if order.digitalUrl ~= nil then
+      amount=order.orderTotal
+      --debugBuffer.print(amount,purpose,qty)
+    end
+    if purpose~= nil and amount ~=invalidPrice and qty~= invalidQty then
+      if doInsert then
+        table.insert(order.orderPositions,{purpose=purpose,amount=amount,qty=qty})
+        order.orderSum=order.orderSum+amount*qty
+      end
+      if refund~=invalidPrice then
+        order.orderPositions[#order.orderPositions].refund=refund
+        refund=invalidPrice
+        --debugBuffer.print("refunded",order)
+      end
+    else
+      order.invalidArticles=true
+      --debugBuffer.print("invalid article",order.orderCode,amount,qty)
+    end
+  end) -- article
+end
+
+--- @function makeBranch
+-- @param #map tree
+-- @param #list branch
+-- @return #map
+
+
+function makeBranch(tree,branch)
+  local temp=tree
+  for _,v in ipairs(branch) do
+    if temp[v] == nil then
+      temp[v]={}
+    end
+    temp=temp[v]
+  end
+  return temp
+end
+
+--- @type returned
+--  @field #number amount
+--  @number #number bookingDate
+
+--- @function getReturnsFromDetails
+-- @param #table orderDetails
+-- @param #order order
+-- @return
+
+function getReturnsFromDetails(orderDetails,order)
+  orderDetails:xpath('//div[@id="od-returns-panel"]//div[@class="a-box-inner"]'):each(function(index,returnedShipments)
+    -- debugBuffer.print(order.orderCode)
+    local bookingDate=getDate(returnedShipments:xpath('.//div[@class="a-row a-spacing-base"]'):text())
+
+    if bookingDate ~= invalidDate then
+      returnedShipments:xpath('.//div[@class="a-row a-spacing-mini"]'):each(function(index,returnedItems)
+        local purpose
+        local amount=invalidPrice
+        returnedItems:xpath('.//div[@class="a-row"]'):each(function(index,row)
+          if purpose==nil then
+            purpose=row:text()
+          else
+            local price=getPrice(row:text())
+            if price~=invalidPrice then
+              amount=price
+            end
+          end
+        end) -- row
+        if amount ~=invalidPrice and bookingDate ~=invalidDate then
+          makeBranch(order,{'returns',bookingDate,amount,purpose})
+          -- debugBuffer.print(order.returns)
+        end
+      end)
+    end
+  end)
+  return
+end
+
+--- @function getRefundTransActions
+-- @param  #table orderDetails
+-- @param #order order
+-- @return
+--
+function getRefundTransActions(orderDetails,order)
+  orderDetails:xpath('.//div[@class="a-box a-last"]//div[@class="a-row a-color-success"]'):each(function(index,transaction)
+    local bookingDate=getDate(transaction:text())
+    local amount=getPrice(transaction:text())
+    if bookingDate ~= invalidDate and amount ~= invalidPrice  then
+      makeBranch(order,{'refundTransactions',bookingDate,amount})
+    end
+  end)
+  return
+end
+
+
+--- @function getOrderDetails
+-- @param #order order
+-- @return
+--
+function getOrderDetails(order)
+  if order.detailsUrl ~= "" then
+    --debugBuffer.print("getOrderDetails")
+    local html=connectShopWithCheck("GET",order.detailsUrl)
+    local orderDetails=html:xpath('//div[@id="orderDetails"]')
+    if orderDetails:text() ~="" then
+      local totals=getTotalsFromDetails(html)
+      --debugBuffer.print("total error",order.orderCode,"order",order.orderTotal , "totals",totals.orderTotal)
+      local doInsert=#order.orderPositions == 0
+      if doInsert then
+        order.orderSum=0
+      end
+      html:xpath('//div[contains(concat(" ", normalize-space(@class), " "), " a-box shipment ")]'):each( function(index,shipment)
+        getArticleFromShipment(shipment,order,doInsert)
+      end)
+      getReturnsFromDetails(orderDetails,order)
+      getRefundTransActions(orderDetails,order)
+      order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans randomly in future
+    else
+      -- debugBuffer.print("getOrderDetails not details",order.orderCode)
+    end
+  else
+    -- no handling for digital orders
+    order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans in future
+  end
+end
+
+function getOrdersFromSummary(html)
+  local orders={}
+  html:xpath('//div[@id="ordersContainer"]//div[@class="a-box-group a-spacing-base order"]'):each(function(index,orderBox)
+    local orderInfo=orderBox:xpath('.//div[contains(@class,"order-info")]')
+    local order={orderPositions={},orderSum=0,refund=0,detailsDate=2} -- #order
+    if getOrderInfosFromSummaryHeader(orderInfo,order) then
+      orderBox:xpath('.//div[not(contains(@class,"order-info"))]//div[@class="a-box-inner"]'):each(function(index,shipment)
+        if isShipmentShorted(shipment) then
+          order.detailsDate=0
+          --debugBuffer.print("shorted",order.orderCode)
+        else
+          getArticleFromShipment(shipment,order)
+        end
+      end) -- shipment
+      if order.invalidArticles ~= nil then
+        order.orderPositions={}
+        order.invalidArticles=nil
+      end
+      orders[order.orderCode]=order
+    end
+  end) -- orderbox
+  return orders
+end
+
+function getMessageListURL(ajaxToken,page,pageToken)
+  local url='/gp/message/ajax/message-list.html?'
+  local fields={
+    messageType='all',
+    startDateTime=1000,
+    endDateTime=3167942400000,
+    pageSize=10,
+    pageNum=page,
+    sourcePage='inbox',
+    isMobile=0,
+    pageToken=pageToken,
+    token=ajaxToken,
+    stringDebug='',
+    isDebug=''
+  }
+  local t={}
+  for k,v in pairs(fields) do
+    if v ~= nil then
+      table.insert(t,k..'='..MM.urlencode(v))
+    end
+  end
+  return url..table.concat(t,"&")
+end
+
+function getMessageURL(ajaxToken,messageId,threadId,messageDateTime)
+  local url='/gp/message/ajax/message-content.html?'
+  local fields={
+    messageId=messageId,
+    threadId=threadId,
+    messageType='all',
+    sourcePage='inbox',
+    messageDateTime=messageDateTime,
+    isMobile=0,
+    token=ajaxToken,
+    stringDebug='',
+    isDebug=''
+  }
+  local t={}
+  for k,v in pairs(fields) do
+    if v ~= nil then
+      table.insert(t,k..'='..MM.urlencode(v))
+    end
+  end
+  return url..table.concat(t,"&")
+end
+
+
+function getMessageList(since)
+  since=since*1000 -- in milliseconds
+  local orderIds={}
+  local html=connectShop("GET","/gp/message")
+  local ajaxToken=html:xpath('//script[@type="a-state"]'):text()
+  ajaxToken=string.match(ajaxToken,'{"token":"([A-Z0-9]+)"}')
+  --print("ajaxToken",ajaxToken)
+  if ajaxToken ~= "" then
+    local page=1
+    local messages={}
+    local nextPageToken
+    repeat
+      MM.printStatus("Get page",page,"from Amazon message center.")
+      local json=connectShopJson("GET",getMessageListURL(ajaxToken,page,nextPageToken))
+      local noNextPage=true
+      if json.html ~= nil then
+        local newMessages=false
+        local html=HTML("<html><body>"..json['html'].."</html></body>")
+        html:xpath('//td'):each(function(index,td)
+          local message={}
+          for _,k in pairs({'messageSentTime','messageId','threadId'}) do
+            message[k]=td:attr(k:lower())
+          end
+          if tonumber(message.messageSentTime) > since then
+            messages[message.messageId]=message
+            newMessages=true
+          end
+          --debugBuffer.print(message)
+        end)
+        json.html = nil
+        --debugBuffer.print(page,json)
+        if json.nextPageToken~= nil and newMessages then
+          noNextPage=false
+          page=page+1
+          nextPageToken=json.nextPageToken
+        end
+      end
+      --debugBuffer.flush()
+    until noNextPage
+    local numAll=0
+    local num=0
+    for _,v in pairs(messages) do
+      numAll=numAll+1
+    end
+    for _,v in pairs(messages) do
+      num=num+1
+      MM.printStatus("Get Amazon message",num,"of",numAll)
+      local json=connectShopJson("GET",getMessageURL(ajaxToken,v.messageId,v.threadId,v.messageSentTime))
+      if json.html ~= nil then
+        local html=HTML("<html><body>"..json['html'].."</html></body>")
+        for orderId in html:html():gmatch(const.regexOrderCodeNew) do
+          orderIds[orderId]=tonumber(v.messageSentTime)/1000 -- in milliseconds
+        end
+      end
+    end
+  end
+  local numOrders=0
+  for k,v in pairs(orderIds) do
+    numOrders=numOrders+1
+  end
+  print(numOrders,"orders from messages")
+  --debugBuffer.print(orderIds)
+  --debugBuffer.flush()
+  return orderIds
+end
 
 function SupportsBank (protocol, bankCode)
   return protocol == ProtocolWebBanking and "Amazon Orders" == bankCode:sub(1,#"Amazon Orders")
@@ -483,15 +916,24 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     mfa1run=true
     aName=nil
 
-    -- issue5
-    LocalStorage.orderFilterCache={}
+    if LocalStorage.loginCounter == nil then
+      LocalStorage.loginCounter=0
+    end
+    LocalStorage.loginCounter=LocalStorage.loginCounter+1
+    print("run=",LocalStorage.loginCounter)
 
-    if config['debug'] then
+    if config.debug then
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
         print("webcache on")
-        LocalStorage.OrderCache={}
-        LocalStorage.orderFilterCache={}
+        local temp=webCacheFolder.."/cleanLocalStorage"
+        local cleanLocalStorage=os.rename(temp,temp) and true or false
+        if cleanLocalStorage then
+          print("clean LocalStorage")
+          LocalStorage.OrderCache={}
+          LocalStorage.orderFilterCache={}
+          LocalStorage.newestMessage=0
+        end
       end
     end
     html = connectShop("GET",baseurl)
@@ -505,7 +947,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
   --div id="image-captcha-section"
   if captcha ~= "" then
-    if config['debug'] then print("login captcha") end
+    if config.debug then print("login captcha") end
     if captcha1run then
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
@@ -531,13 +973,13 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     local text=''
     local number=0
     local passcode1run=true
-    if config['debug'] then print("passcode 1. part") end
+    if config.debug then print("passcode 1. part") end
     html:xpath('//input[@type="radio"]'):each(function (index,element)
       text=text..index..". "..element:xpath('..'):text().."\n"
       number=index
       if  tonumber(index) == tonumber(credentials[1]) then
         element:attr('checked','checked')
-        if config['debug'] then print("select",element:xpath('..'):text()) end
+        if config.debug then print("select",element:xpath('..'):text()) end
         passcode1run=false
       else
         element:attr('checked','')
@@ -578,7 +1020,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
   -- passcode part 2
   if html:xpath('//form[@action="verify"]'):text() ~= '' then
-    if config['debug'] then print("passcode 2. part") end
+    if config.debug then print("passcode 2. part") end
     html:xpath('//*[@name="code"]'):attr("value",credentials[1])
     html= connectShop(html:xpath('//form[@action="verify"]'):submit())
   end
@@ -586,7 +1028,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- 2.FA
   local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
   if mfatext ~= "" then
-    if config['debug'] then print("login mfa") end
+    if config.debug then print("login mfa") end
     if mfa1run then
       -- print("mfa="..mfatext)
       mfa1run=false
@@ -650,16 +1092,20 @@ end
 
 function RefreshAccount (account, since)
   local mixed=false
-  --since=os.time()
+  local now=os.time()
+
   webCacheState='RefreshAccount'
+  local regTestPre="normal"
 
   local divisor=-100
   if account.accountNumber == "inverse" then
     divisor=100
+    regTestPre="inverse"
   end
 
   if account.accountNumber == "mix" then
     mixed=true
+    regTestPre="mix"
   end
   print("Refresh",account.accountNumber)
   if LocalStorage.getOrders[account.accountNumber] == false or LocalStorage.getOrders[account.accountNumber] == nil then
@@ -669,412 +1115,227 @@ function RefreshAccount (account, since)
       {
         name="Please reload!",
         amount = 0,
-        bookingDate = 1,
+        bookingDate = now,
         purpose = "... and drink a coffee :)",
         booked = false,
       }
     }}
   end
 
-  html=connectShop("GET",baseurl)
+  local transactions={}
 
-  -- Bestellungen
-  html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
+  if LocalStorage.loginCounter ~= LocalStorage.lastLoginCounter then
 
-  if LocalStorage.OrderCache == nil then
-    LocalStorage.OrderCache={}
-  end
+    html=connectShop("GET",baseurl)
 
-  if LocalStorage.orderFilterCache == nil then
-    LocalStorage.orderFilterCache={}
-  end
+    -- Bestellungen
+    html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
 
-  if LocalStorage.invalidCache == nil then
-    LocalStorage.invalidCache={}
-  end
+    if LocalStorage.OrderCache == nil then
+      LocalStorage.OrderCache={}
+    end
 
-  local orders={}
-  local returns=getReturnHistory()
-  local numOfOrders=0
+    if LocalStorage.orderFilterCache == nil then
+      LocalStorage.orderFilterCache={}
+    end
 
-  -- issue5
-  local countOrders={}
-  --https://www.amazon.de/spr/returns
+    if LocalStorage.invalidCache == nil then
+      LocalStorage.invalidCache={}
+    end
 
+    local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    orderFilterSelect:each(function(index,element)
+      local orderFilterVal=element:attr('value')
+      local foundOrders=true
+      local foundNewOrders=false
+      if LocalStorage.orderFilterCache[orderFilterVal] == nil then
+        MM.printStatus('Get order overview for "'..element:text()..'"')
+        --print(orderFilterVal)
+        html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
+        html=connectShop(html:xpath('//*[@id="timePeriodForm"]'):submit())
 
-  local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
-  orderFilterSelect:each(function(index,element)
-    local orderFilterVal=element:attr('value')
-    local foundOrders=true
-    local foundNewOrders=false
-    if LocalStorage.orderFilterCache[orderFilterVal] == nil then
-      --print(orderFilterVal)
-      html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
-      html=connectShop(html:xpath('//*[@id="timePeriodForm"]'):submit())
-
-      --issue5
-      countOrders[orderFilterVal]={counts=0,text=html:xpath('//span[@class="num-orders"]'):text()}
-
-      local foundEnd=false
-      repeat
-
-        -- get order details from overview when possible
-        html:xpath('//div[contains(@class,"a-box-group")]'):each(function (index,element)
-          -- handle returns
-          element:xpath('.//a[contains(@href,"/returns/") and contains(@href,"_status_")]'):each(function (index,element)
-            local url=element:attr("href")
-            if containsOrderCode(url) then
-              returns[getOrderCode(url)]=false
-              print("return",getOrderCode(url))
-            end
-          end)
-
-          local detailsUrl=element:xpath('.//a[contains(@href,"order-details") and @class="a-link-normal"]'):attr('href')
-          -- link present for details = shorted overview -> skip
-          if element:xpath('.//div[contains(@class,"shipment")]//a[contains(@href,"order-details")]'):text()=='' and  detailsUrl ~=nil then
-            local headData={}
-            element:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
-              headData[index]=element:text()
-            end)
-            if #headData == 3 then
-              local bookingDate,orderSum,orderCode=getDate(headData[1]),getPrice(headData[2]),getOrderCode(headData[3])
-              if orderCode ~= nil and LocalStorage.OrderCache[orderCode] == nil then
-                if orderSum ~= invalidPrice then
-                  if bookingDate >0 and bookingDate ~= invalidDate then
-                    --print(bookingDate,orderSum,orderCode)
-                    local vaildOrder=true
-                    local orderPositions={}
-                    element:xpath('.//div[@class="a-fixed-left-grid-inner"]'):each(function (index,element)
-                      local purpose=removeSpaces(element:xpath('.//div[@class="a-fixed-left-grid-col a-col-right"]/descendant::div[@class="a-row"][1]'):text())
-                      local amount=getPrice(element:xpath('.//*[contains(@class,"a-color-price") or contains(@class,"gift-card-instance")]'):text())
-                      local qty=getQtyFromElement(element)
-                      if purpose ~= nil and qty~= invalidQty then
-                        table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
-                      else
-                        vaildOrder=false
-                        print("found invalid position in order",orderCode)
-                      end
-                      return vaildOrder
-                    end)
-
-                    if #orderPositions == 1 and orderPositions[1].amount == invalidPrice then
-                      -- can be a digital article
-                      orderPositions[1].amount = orderSum
-                    end
-
-                    local total=0
-                    for _,v in pairs(orderPositions) do
-                      if v.amount == invalidPrice then
-                        vaildOrder=false
-                      end
-                      total=total+v.amount*v.qty
-                    end
-
-                    if vaildOrder and #orderPositions>0 then
-                      LocalStorage.OrderCache[orderCode]={detailsUrl=detailsUrl,orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
-                    end
-                  else
-                    print("no date found for order",orderCode,"found='"..tostring(headData[1]).."'")
-                  end
-                else
-                  print("no valid sum found for order", orderCode, "found='"..tostring(headData[2]).."'")
-                end
-              end
-            else
-              print("skip order, get wrong number of elements date='"..tostring(headData[1]).."' sum='"..tostring(headData[2]).."' code='"..tostring(headData[3]).."'")
-            end
-          end
-        end)
-        -- get all order details urls
-        html:xpath('//a[contains(@href,"order-details") and @class="a-link-normal"]'):each(function(index,orderLink)
-          local url=orderLink:attr('href')
-          local orderCode=string.match(url,'orderID='..config.regexOrderCode)
-          if orderCode ~= "" then
-
-            -- issue5
-            countOrders[orderFilterVal].counts=countOrders[orderFilterVal].counts+1
-
-            -- order cached?
-            if  LocalStorage.OrderCache[orderCode] == nil and orders[orderCode] == nil then
-              numOfOrders=numOfOrders+1
-              if config['debug'] then print("new order="..orderCode,'No='..numOfOrders) end
-              orders[orderCode]=url
+        local foundEnd=false
+        repeat
+          for k,v in pairs(getOrdersFromSummary(html)) do
+            foundOrders=true
+            if LocalStorage.OrderCache[k]==nil then
+              LocalStorage.OrderCache[k]=v
               foundNewOrders=true
             end
+          end
+          local nextPage=html:xpath('//li[@class="a-last"]/a[@href]')
+          if nextPage:text() ~= "" then
+            html=connectShop(nextPage:click())
           else
-            foundOrders=false
+            foundEnd=true
           end
-        end)
-        local nextPage=html:xpath('//li[@class="a-last"]/a[@href]')
-        if nextPage:text() ~= "" then
-          html=connectShop(nextPage:click())
-        else
-          foundEnd=true
-        end
-      until foundEnd
-      if orderFilterVal ~= 'months-6' and not foundNewOrders and foundOrders then
-        LocalStorage.orderFilterCache[orderFilterVal]=true
-        --print("orderFilter="..orderFilterVal.." cached")
-      end
-    end
-    return numOfOrders<config['maxOrdersToRead']
-  end)
-
-  for orderCode,_ in pairs(returns) do
-    if orders[orderCode] == nil and LocalStorage.OrderCache[orderCode] ~= nil then
-      orders[orderCode]=LocalStorage.OrderCache[orderCode].detailsUrl
-      numOfOrders=numOfOrders+1
-      returns[orderCode]=true
-      print("add return",orderCode)
-    end
-  end
-
-  local posbox='//div[@class="a-row"]/div[contains(@class,"a-fixed-left-grid")]//'
-  local maxOrders=numOfOrders
-  if maxOrders >= config['maxOrdersToRead'] then
-    maxOrders=config['maxOrdersToRead']
-  end
-
-  numOfOrders=0
-
-  local transactions={}
-  -- get order details from order details page
-  for orderCode,orderUrl in pairs(orders) do
-    print(orderCode,orderUrl)
-    numOfOrders=numOfOrders+1
-    local returnedArticles=nil
-    html=connectShop("GET",orderUrl)
-    if html:xpath('//div[@id="orderDetails"]'):text() ~= "" then
-      -- get return url
-      html:xpath('//a[contains(@href,"/returns/") and contains(@href,"_status_")]'):each(function (index,element)
-        local url=(element:attr("href")),element:attr("href")
-        if getOrderCode(url) == orderCode then
-          print("detect return")
-          if LocalStorage.OrderCache[orderCode] ~=nil and LocalStorage.OrderCache[orderCode].returnedArticles ~= nil then
-            returnedArticles=LocalStorage.OrderCache[orderCode].returnedArticles
-          else
-            returnedArticles={}
-          end
-          local returnPage=connectShop(element:click())
-          -- returned items:
-          returnPage:xpath('//div[@id="-returnable-item"]'):each(function (index,element)
-            local qty=getQtyFromElement(element)
-            local purpose=element:xpath('.//div[@class="a-row"]/span[@class="a-size-base a-text-bold"]'):text()
-            local amount=getPrice(element:xpath('.//span//font'):text())
-            local bookingDate=getDate(element:xpath('//span[@class="a-size-small a-color-secondary"]//font/../..'):text())
-            print(qty,purpose,amount,bookingDate)
-            if qty ~= invalidQty and amount ~=invalidPrice and bookingDate ~=invalidDate then
-              local k=MM.md5(table.concat({qty,purpose,amount,bookingDate},"\t"))
-              if returnedArticles[k]== nil then
-                returnedArticles[k]={qty=qty,purpose=purpose,amount=amount,bookingDate=bookingDate,since=since}
-              end
-            end
-          end)
-        end
-      end)
-
-      local orderDate = html:xpath('//span[@class="order-date-invoice-item"]'):text()
-      if orderDate == "" then
-        orderDate = html:xpath('//span[@class="a-color-secondary value"]'):text()
-      end
-      print(numOfOrders..'/'..maxOrders,'orderCode='..orderCode,'orderDate='..orderDate)
-      if orderDate ~= "" and LocalStorage.OrderCache[orderCode] == nil then
-        local orderSum=invalidPrice
-        html:xpath('//span[contains(@class,"a-text-bold")]'):each(function (index,element)
-          orderSum=getPrice(element:text())
-          return orderSum==invalidPrice
-        end)
-        local bookingDate=getDate(orderDate)
-        if bookingDate>0 and orderSum ~= invalidPrice then
-          local orderPositions={}
-          local total=0
-          for k,position in ipairs({html:xpath(posbox..'span[contains(@class,"price")]'),html:xpath(posbox..'div[contains(@class,"gift-card-instance")]')}) do
-            position:each(function (index,element)
-              local purpose=removeSpaces(element:xpath('../..//a'):text())
-              local amount=getPrice(element:text())
-              local qty=1
-              if nodeExists(element,'../../..//span[@class="item-view-qty"]') then
-                qty=getQty(element:xpath('../../..//span[@class="item-view-qty"]'):text())
-              end
-              --print(purpose,amount)
-              table.insert(orderPositions,{purpose=purpose,amount=amount,qty=qty})
-              total=total+amount*qty
-              return true
-            end)
-          end
-          if #orderPositions >0 then
-            LocalStorage.OrderCache[orderCode]={orderSum=orderSum,total=total,since=since,bookingDate=bookingDate,orderPositions=orderPositions}
-          end
+        until foundEnd
+        if orderFilterVal ~= 'months-6' and not foundNewOrders and foundOrders then
+          LocalStorage.orderFilterCache[orderFilterVal]=true
+          --print("orderFilter="..orderFilterVal.." cached")
         end
       end
+      return true
+    end)
 
+    -- modified orders? read messages
+    if LocalStorage.newestMessage == nil then
+      LocalStorage.newestMessage = now-(24*60*60)
+    end
 
+    local newestMessage=LocalStorage.newestMessage
 
-      if numOfOrders >= config['maxOrdersToRead'] then
-        print('maximal orders to read limit of',config['maxOrdersToRead'],'reached!')
-        table.insert(transactions,{
-          name="Warning, max order limit reached.",
-          amount = 0,
-          bookingDate = os.time(),
-          purpose = string.format('Please reload the account to get the next %d orders.',config['maxOrdersToRead']),
-          booked=false,
-        })
-        break
+    for orderCode,messageTime in pairs(getMessageList(LocalStorage.newestMessage)) do
+
+      if newestMessage<messageTime then
+        newestMessage=messageTime
+      end
+      if LocalStorage.OrderCache[orderCode] ~= nil then
+        LocalStorage.OrderCache[orderCode].detailsDate=1
       end
     end
-    if LocalStorage.OrderCache[orderCode] ~= nil then
-      LocalStorage.OrderCache[orderCode].returnedArticles=returnedArticles
-    else
-      if LocalStorage.invalidCache[orderCode]== nil then
-        LocalStorage.invalidCache[orderCode]=3
-      end
-      if LocalStorage.invalidCache[orderCode] > 0 then
-        print("can't parse order details",orderCode,"reportCounter=",LocalStorage.invalidCache[orderCode])
-        table.insert(transactions,{
-          name=orderCode,
-          amount = 0,
-          bookingDate = os.time(),
-          purpose = "Warning: Can't parse the order details, a account reload may fix it.",
-          booked=false,
-        })
-        LocalStorage.invalidCache[orderCode]=LocalStorage.invalidCache[orderCode]-1
-      else
-        LocalStorage.invalidCache[orderCode]= nil
-        LocalStorage.OrderCache[orderCode]={orderSum=0,
-          total=0,since=since,bookingDate=os.time(),report=2,
-          orderPositions={
-            [1]={purpose="Error: Can't parse the order details for order "..orderCode.."!",
-              amount=0,qty=1
-            }
-          }
-        }
+    LocalStorage.newestMessage = newestMessage
+
+    -- count order details to get
+
+    local ordersCounter=0
+    local ordersTotal=0
+
+    for orderCode,order in pairs(LocalStorage.OrderCache) do
+      if order.detailsDate < now then
+        ordersTotal=ordersTotal+1
       end
     end
+
+    -- get order details from order details page
+
+    for orderCode,order in pairs(LocalStorage.OrderCache) do
+      if order.detailsDate < now then
+        ordersCounter=ordersCounter+1
+        MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
+        getOrderDetails(order)
+      end
+    end
+
+    LocalStorage.lastLoginCounter = LocalStorage.loginCounter
+  else
+    print("skip account scan")
   end
 
   local balance=0
-
   for orderCode,order in pairs(LocalStorage.OrderCache) do
-    balance=balance+order.orderSum
 
-    if order.returnedArticles ~= nil then
-      for _,position in pairs(order.returnedArticles) do
-        balance=balance+ position.amount/divisor*position.qty*-1
-      end
+    -- orderPositions,{purpose=purpose,amount=amount,qty=qty})
+    if not mixed then
+      balance=balance+order.orderTotal
+    end
+    if order.since == nil then
+      order.since=now
     end
 
-
-    if order.orderSum ~= order.total and order.since >= since then
-      table.insert(transactions,{
-        name=orderCode,
-        amount = (order.orderSum-order.total)/divisor,
-        bookingDate = order.bookingDate,
-        purpose = config['differenceText'],
-        booked=not webCache
-      })
-    end
-
-    local report=true
-    if order.report~=nil then
-      if order.report >0 then
-        order.report=order.report-1
-      else
-        report=false
-      end
-    end
-    if order.since >= since and report then
+    if order.since >= since then
       for index,position in pairs(order.orderPositions) do
-        local rQty=1
-        local mQty=1
-        if position.qty> config['splitQty'] then
-          mQty=position.qty
-        else
-          rQty=position.qty
-        end
-        for i=1,rQty,1 do
+        table.insert(transactions,{
+          name=orderCode,
+          amount = position.amount/divisor*position.qty,
+          bookingDate = order.bookingDate+1,
+          purpose = MM.toEncoding(const.fixEncoding,position.purpose),
+        })
+      end
+
+      if order.orderSum ~= order.orderTotal then
+        table.insert(transactions,{
+          name=orderCode,
+          amount = (order.orderTotal-order.orderSum)/divisor,
+          bookingDate = order.bookingDate,
+          purpose = const.differenceText,
+        })
+      end
+
+      if mixed and order.orderTotal ~= 0 then
+        if order.since >= since then
           table.insert(transactions,{
             name=orderCode,
-            amount = position.amount/divisor*mQty,
-            bookingDate = order.bookingDate+1,
-            purpose = MM.toEncoding(config['fixEncoding'],position.purpose),
-            booked=not webCache
+            amount = order.orderTotal/divisor*-1,
+            bookingDate = order.bookingDate,
+            purpose = const.contra..orderCode,
           })
         end
       end
-
-      if mixed and order.orderSum ~= 0 then
-        table.insert(transactions,{
-          name=orderCode,
-          amount = order.orderSum/divisor*-1,
-          bookingDate = order.bookingDate,
-          purpose = config['contra']..orderCode,
-          booked=not webCache
-        })
-      end
     end
-    if order.returnedArticles ~= nil then
-      for _,position in pairs(order.returnedArticles) do
-        if position.since>=since then
-          local rQty=1
-          local mQty=1
-          local purpose=position.purpose
-          if purpose:sub(-3) == '...' then
-            local founds=0
-            for i,p in pairs(order.orderPositions) do
-              if p.purpose:sub(1,#position.purpose-3)==position.purpose:sub(1,#position.purpose-3) then
-                founds=founds+1
-                purpose=p.purpose
-              end
-            end
-            if founds >1 then
-              purpose=position.purpose
-            end
+
+    -- makeBranch(order,{'refundTransactions',bookingDate,amount})
+    if order.refundTransactions ~= nil then
+      for bookingDate,v in pairs(order.refundTransactions) do
+        for amount,v in pairs(v) do
+
+          if not mixed then
+            balance=balance-amount
           end
-          if position.qty> config['splitQty'] then
-            mQty=position.qty
-          else
-            rQty=position.qty
+
+          if v.since== nil then
+            v.since=now
           end
-          for i=1,rQty,1 do
+          if v.since >= since then
             table.insert(transactions,{
               name=orderCode,
-              amount = position.amount/divisor*mQty*-1,
-              bookingDate = position.bookingDate+1,
-              purpose = config.refund..MM.toEncoding(config['fixEncoding'],purpose),
-              booked=not webCache
+              amount = amount/divisor*-1,
+              bookingDate = bookingDate,
+              purpose = const.refundTransaction..orderCode,
             })
-          end
-          if mixed then
-            table.insert(transactions,{
-              name=orderCode,
-              amount = (position.amount*position.qty)/divisor,
-              bookingDate = position.bookingDate,
-              purpose = config.refundContra..purpose,
-              booked=not webCache
-            })
+            if mixed then
+              table.insert(transactions,{
+                name=orderCode,
+                amount = amount/divisor,
+                bookingDate = bookingDate,
+                purpose = const.refundTransactionContra..orderCode,
+              })
+            end
           end
         end
       end
     end
 
-
+    -- makeBranch(order,{'returns',bookingDate,amount,purpose})
+    if order.returns ~= nil then
+      for bookingDate,v in pairs(order.returns) do
+        for amount,v in pairs(v) do
+          for purpose,v in pairs(v) do
+            if not mixed then
+              balance=balance-amount
+            end
+            if v.since== nil then
+              v.since=now
+            end
+            if v.since >= since then
+              table.insert(transactions,{
+                name=orderCode,
+                amount = amount/divisor*-1,
+                bookingDate = bookingDate,
+                purpose = MM.toEncoding(const.fixEncoding,const.returnText..purpose),
+              })
+              table.insert(transactions,{
+                name=orderCode,
+                amount = amount/divisor,
+                bookingDate = bookingDate,
+                purpose = MM.toEncoding(const.fixEncoding,const.returnTextContra..purpose),
+              })
+            end
+          end
+        end
+      end
+    end
   end
 
-  if mixed then
-    balance=0
-  end
+  RegressionTest.run(transactions,regTestPre)
 
-  -- issue5
-  countOrders['last30']=nil
-  countOrders['months-6']=nil
-  numOfOrders=0
-  for orderFilterVal,x in pairs(countOrders) do
-    print("orderFilterVal="..orderFilterVal," counts=",x.counts,"text=",x.text)
-    numOfOrders=numOfOrders+x.counts
-  end
-  print("total=",numOfOrders)
+  debugBuffer.flush()
 
-  RegressionTest.run(transactions)
+  if webCache then
+    for _,v in pairs(transactions) do
+      v.booked=false
+    end
+  end
 
   -- Return balance and array of transactions.
   return {balance=balance/divisor, transactions=transactions}
@@ -1082,8 +1343,8 @@ end
 
 function EndSession ()
   -- Logout.
-  if config['reallyLogout'] then
-    local logoutElement=html:xpath('//a[contains(@href,"sign-out")]')
+  if config.reallyLogout then
+    local logoutElement=html:xpath('//a[@id="nav-item-signout" or contains(@href,"sign-out")]')
     if logoutElement ~= nil then
       print("Logout")
       if logoutElement:click() ~= nil then
