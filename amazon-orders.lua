@@ -70,6 +70,7 @@ local const={
   refundTransactionContra="Amazon contra refund for order ",
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
+  xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
 }
 
 function mergeConfig(default,read)
@@ -899,7 +900,7 @@ function enterCredentials(state)
     html= connectShop(html:xpath(xpform):submit())
     if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
       print("skip phone dialog...")
-      html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
+      html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
     end
   end
 end
@@ -937,7 +938,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       end
     end
     html = connectShop("GET",baseurl)
-    html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
+    html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
 
     enterCredentials('1.login')
   end
@@ -1129,7 +1130,7 @@ function RefreshAccount (account, since)
     html=connectShop("GET",baseurl)
 
     -- Bestellungen
-    html= connectShop(html:xpath('//a[@id="nav-orders"]'):click())
+    html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
 
     if LocalStorage.OrderCache == nil then
       LocalStorage.OrderCache={}
