@@ -1,6 +1,6 @@
 -- Amazon Plugin for https://moneymoney-app.com
 --
--- Copyright 2019 Michael Beutling
+-- Copyright 2019-2020 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -62,7 +62,7 @@ local const={
   },
   domain='.amazon.de',
   services    = {"Amazon Orders"},
-  description = "Give you a overview about your amazon orders.",
+  description = "Give you an overview about your amazon orders.",
   contra="Amazon contra ",
   returnText="Returned item: ",
   returnTextContra="Amazon contra returned item: ",
@@ -171,7 +171,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.07,
+WebBanking{version  = 1.08,
   url         = baseurl,
   services    = const.services,
   description = const.description}
