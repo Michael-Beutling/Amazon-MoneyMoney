@@ -2,6 +2,12 @@
 ## Installation
 copy *amazon-orders.lua* script in the *~/Library/Containers/com.moneymoney-app.retail/Data/Library/Application\ Support/MoneyMoney/Extensions* Folder or run the *link_ext.sh* script in a shell.
 
+**Look out:** MoneyMoney only runs unsigned plugins in the **beta version** and you need to **disable signature check** in the extentsion settings.
+After installation go to *add new account* - *others* - *Amazon Orders*.
+Normal will list your spendings like a normal account.
+Inverted will have your spendings with positive values.
+Mixed will show a positive booking for every position, so the total adds up to Zero.
+
 ## Config
 Only for unsigned version:
 For **.de** users it's already configured. For another sites please edit the JSON file in the *~/Library/Containers/com.moneymoney-app.retail/Data/* folder and hope the best ;) 
@@ -14,3 +20,5 @@ The script cache same data, but the first time it's scraped your whole order his
 ## Warranty
 Nope, no warrenty! When the script order 10 tons of dog food every day, it's your problem!     
 
+## Beta-Version
+You found the Beta-Version here [amazon-orders.lua](https://raw.githubusercontent.com/Michael-Beutling/Amazon-MoneyMoney/beta/amazon-orders.lua).
