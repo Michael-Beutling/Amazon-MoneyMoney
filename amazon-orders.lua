@@ -522,10 +522,20 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
   end)
 
   if #headData >= 3 then
-    order.bookingDate=getDate(headData[1])
-    order.orderTotal=getPrice(headData[2])
-    order.orderCode=getOrderCode(headData[3])
-
+    if #headData == 3 then
+      -- customer account
+      order.bookingDate=getDate(headData[1])
+      order.orderTotal=getPrice(headData[2])
+      order.orderCode=getOrderCode(headData[3])
+    elseif #headData == 4 then
+      -- business account
+      order.bookingDate=getDate(headData[1])
+      order.orderTotal=getPrice(headData[3])
+      order.orderCode=getOrderCode(headData[4])
+      debugBuffer.print("unkown element",headData[2])
+    else
+      debugBuffer.print("unkown elements",table.concat(headData,"#"))
+    end
     if order.bookingDate == invalidDate then
       order.orderCode=nil
       return false
@@ -741,7 +751,7 @@ function getOrderDetails(order)
       getRefundTransActions(orderDetails,order)
       order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans randomly in future
     else
-      -- debugBuffer.print("getOrderDetails not details",order.orderCode)
+      debugBuffer.print("getOrderDetails no details",order.orderCode)
     end
   else
     -- no handling for digital orders
