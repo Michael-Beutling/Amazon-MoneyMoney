@@ -30,7 +30,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=7
+local cacheVersion=8
 local debugBuffer={}
 local webCacheLastId=nil
 
@@ -425,7 +425,15 @@ function RegressionTest.run(transactions,regTestPre)
         bookingDate = os.time(),
         purpose = "",
         booked = false,
-
+        accountNumber='accountNumber',
+        bankCode='bankCode',
+        bookingText='bookingText',
+        endToEndReference='endToEndReference',
+        mandateReference='mandateReference',
+        creditorId='creditorId',
+        returnReason='returnReason',
+      --comment='comment\ncomment\n',
+      --category="test"
       })
     end
   end
@@ -530,9 +538,13 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     elseif #headData == 4 then
       -- business account
       order.bookingDate=getDate(headData[1])
+      order.accountNumber=headData[2]
       order.orderTotal=getPrice(headData[3])
       order.orderCode=getOrderCode(headData[4])
-      debugBuffer.print("unkown element",headData[2])
+      local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
+      if endToEndReference ~= '' then
+        order.endToEndReference=endToEndReference
+      end
     else
       debugBuffer.print("unkown elements",table.concat(headData,"#"))
     end
@@ -579,9 +591,10 @@ end
 -- @field #string detailsUrl
 -- @field #string digitalUrl
 -- @field #list<#orderPosition> orderPositions
--- @field #boolean summaryShorted not all acticles in the summary shown
 -- @field #boolean invalidArticles
 -- @field #number detailsDate
+-- @field #string accountNumber
+-- @field #string endToEndReference
 
 --- @type totals
 -- @field  #number orderTotal Sum of order showed by Amazon
@@ -1061,6 +1074,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
+      aName=html:xpath('//span[@class="abnav-accountfor"]'):text()
+      aName=string.gsub(aName,"Konto für ","")
+    end
+    if aName == "" then
       aName="Unkown"
       -- print("can't get username, new layout?")
     else
@@ -1251,6 +1268,8 @@ function RefreshAccount (account, since)
           amount = position.amount/divisor*position.qty,
           bookingDate = order.bookingDate+1,
           purpose = MM.toEncoding(const.fixEncoding,position.purpose),
+          endToEndReference = order.endToEndReference,
+          accountNumber = order.accountNumber,
         })
       end
 
@@ -1260,6 +1279,8 @@ function RefreshAccount (account, since)
           amount = (order.orderTotal-order.orderSum)/divisor,
           bookingDate = order.bookingDate,
           purpose = const.differenceText,
+          endToEndReference = order.endToEndReference,
+          accountNumber = order.accountNumber,
         })
       end
 
@@ -1270,6 +1291,8 @@ function RefreshAccount (account, since)
             amount = order.orderTotal/divisor*-1,
             bookingDate = order.bookingDate,
             purpose = const.contra..orderCode,
+            endToEndReference = order.endToEndReference,
+            accountNumber = order.accountNumber,
           })
         end
       end
@@ -1293,6 +1316,8 @@ function RefreshAccount (account, since)
               amount = amount/divisor*-1,
               bookingDate = bookingDate,
               purpose = const.refundTransaction..orderCode,
+              endToEndReference = order.endToEndReference,
+              accountNumber = order.accountNumber,
             })
             if mixed then
               table.insert(transactions,{
@@ -1300,6 +1325,8 @@ function RefreshAccount (account, since)
                 amount = amount/divisor,
                 bookingDate = bookingDate,
                 purpose = const.refundTransactionContra..orderCode,
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
               })
             end
           end
@@ -1324,12 +1351,16 @@ function RefreshAccount (account, since)
                 amount = amount/divisor*-1,
                 bookingDate = bookingDate,
                 purpose = MM.toEncoding(const.fixEncoding,const.returnText..purpose),
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
               })
               table.insert(transactions,{
                 name=orderCode,
                 amount = amount/divisor,
                 bookingDate = bookingDate,
                 purpose = MM.toEncoding(const.fixEncoding,const.returnTextContra..purpose),
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
               })
             end
           end
