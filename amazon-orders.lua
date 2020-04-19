@@ -30,7 +30,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=8
+local cacheVersion=9
 local debugBuffer={}
 local webCacheLastId=nil
 
@@ -741,6 +741,29 @@ function getRefundTransActions(orderDetails,order)
 end
 
 
+--- @function getOrderaddress
+-- @param #table html
+-- @param #order order
+-- @return
+--
+
+function getOrderaddress(orderDetails,order)
+  if order.endToEndReference == nil then
+    local name=orderDetails:xpath('//div[contains(@class,"od-shipping-address-container")]//div[@class="a-row"]'):text()
+    local address=orderDetails:xpath('//div[contains(@class,"od-shipping-address-container")]//div[@class="displayAddressDiv"]'):text()
+
+    if name ~='' and address ~= '' then
+      name=name.." "..address
+    elseif name == '' then
+      name=address
+    end
+
+    if name ~= '' then
+      order.endToEndReference=name
+    end
+  end
+end
+
 --- @function getOrderDetails
 -- @param #order order
 -- @return
@@ -762,6 +785,7 @@ function getOrderDetails(order)
       end)
       getReturnsFromDetails(orderDetails,order)
       getRefundTransActions(orderDetails,order)
+      getOrderaddress(orderDetails,order)
       order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans randomly in future
     else
       debugBuffer.print("getOrderDetails no details",order.orderCode)
