@@ -1406,7 +1406,7 @@ function RefreshAccount (account, since)
 
   for _,v in pairs(transactions) do
     if v.accountNumber == nil then
-      v.accountNumber=account.name
+      v.accountNumber=account.owner
     end
   end
 
