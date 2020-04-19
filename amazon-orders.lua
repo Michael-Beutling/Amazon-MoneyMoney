@@ -1160,6 +1160,7 @@ function RefreshAccount (account, since)
     regTestPre="mix"
   end
   print("Refresh",account.accountNumber)
+
   if LocalStorage.getOrders[account.accountNumber] == false or LocalStorage.getOrders[account.accountNumber] == nil then
     LocalStorage.getOrders[account.accountNumber]=true
 
@@ -1400,6 +1401,12 @@ function RefreshAccount (account, since)
   if webCache then
     for _,v in pairs(transactions) do
       v.booked=false
+    end
+  end
+
+  for _,v in pairs(transactions) do
+    if v.accountNumber == nil then
+      v.accountNumber=account.name
     end
   end
 
