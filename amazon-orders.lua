@@ -560,7 +560,6 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
 
   if order.bookingDate == invalidDate then
     order.orderCode=nil
-    return false
   end
 
   if order.orderTotal == invalidPrice then
@@ -572,11 +571,10 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     order.digitalUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/digital/")]'):attr('href')
     if order.digitalUrl == "" then
       order.orderCode=nil
-      return false
     end
   end
-
-  return true
+  
+  return order.orderCode ~= nil
 end
 
 function isShipmentShorted(shipment)
