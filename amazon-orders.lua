@@ -423,7 +423,7 @@ function RegressionTest.run(transactions,regTestPre)
         name="regression test finish",
         amount = num,
         bookingDate = os.time(),
-        purpose = "",
+        purpose = 'run '..LocalStorage.loginCounter,
         booked = false,
         accountNumber='accountNumber',
         bankCode='bankCode',
@@ -529,36 +529,42 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     headData[index]=element:text()
   end)
 
-  if #headData >= 3 then
-    if #headData == 3 then
-      -- customer account
-      order.bookingDate=getDate(headData[1])
-      order.orderTotal=getPrice(headData[2])
-      order.orderCode=getOrderCode(headData[3])
-    elseif #headData == 4 then
-      -- business account
-      order.bookingDate=getDate(headData[1])
-      order.accountNumber=headData[2]
-      order.orderTotal=getPrice(headData[3])
-      order.orderCode=getOrderCode(headData[4])
-      local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
-      if endToEndReference ~= '' then
-        order.endToEndReference=endToEndReference
-      end
-    else
-      debugBuffer.print("unkown elements",table.concat(headData,"#"))
-    end
-    if order.bookingDate == invalidDate then
-      order.orderCode=nil
-      return false
-    end
-    if order.orderTotal == invalidPrice then
-      order.orderCode=nil
-    end
+  if #headData == 3 then
+    -- customer account
+    order.bookingDate=getDate(headData[1])
+    order.orderTotal=getPrice(headData[2])
+    order.orderCode=getOrderCode(headData[3])
+  elseif #headData == 4 then
+    -- business account
+    order.bookingDate=getDate(headData[1])
+    order.accountNumber=headData[2]
+    order.orderTotal=getPrice(headData[3])
+    order.orderCode=getOrderCode(headData[4])
+  elseif #headData == 5 then
+    -- business account
+    order.bookingDate=getDate(headData[1])
+    order.accountNumber=headData[2]
+    order.bookingText=headData[3]
+    order.orderTotal=getPrice(headData[4])
+    order.orderCode=getOrderCode(headData[5])
+  else
+    debugBuffer.print("unkown elements",table.concat(headData,"#"))
+    return false
+  end
+  
+  -- only business accounts
+  local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
+  if endToEndReference ~= '' then
+    order.endToEndReference=endToEndReference
   end
 
-  if order.orderCode == nil then
+  if order.bookingDate == invalidDate then
+    order.orderCode=nil
     return false
+  end
+
+  if order.orderTotal == invalidPrice then
+    order.orderCode=nil
   end
 
   order.detailsUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/order-details/")]'):attr('href')
@@ -1295,6 +1301,7 @@ function RefreshAccount (account, since)
           purpose = MM.toEncoding(const.fixEncoding,position.purpose),
           endToEndReference = order.endToEndReference,
           accountNumber = order.accountNumber,
+          bookingText=order.bookingText,
         })
       end
 
@@ -1306,6 +1313,7 @@ function RefreshAccount (account, since)
           purpose = const.differenceText,
           endToEndReference = order.endToEndReference,
           accountNumber = order.accountNumber,
+          bookingText=order.bookingText,
         })
       end
 
@@ -1318,6 +1326,7 @@ function RefreshAccount (account, since)
             purpose = const.contra..orderCode,
             endToEndReference = order.endToEndReference,
             accountNumber = order.accountNumber,
+            bookingText=order.bookingText,
           })
         end
       end
@@ -1343,6 +1352,7 @@ function RefreshAccount (account, since)
               purpose = const.refundTransaction..orderCode,
               endToEndReference = order.endToEndReference,
               accountNumber = order.accountNumber,
+              bookingText=order.bookingText,
             })
             if mixed then
               table.insert(transactions,{
@@ -1352,6 +1362,7 @@ function RefreshAccount (account, since)
                 purpose = const.refundTransactionContra..orderCode,
                 endToEndReference = order.endToEndReference,
                 accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
             end
           end
@@ -1378,6 +1389,7 @@ function RefreshAccount (account, since)
                 purpose = MM.toEncoding(const.fixEncoding,const.returnText..purpose),
                 endToEndReference = order.endToEndReference,
                 accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
               table.insert(transactions,{
                 name=orderCode,
@@ -1386,6 +1398,7 @@ function RefreshAccount (account, since)
                 purpose = MM.toEncoding(const.fixEncoding,const.returnTextContra..purpose),
                 endToEndReference = order.endToEndReference,
                 accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
             end
           end
