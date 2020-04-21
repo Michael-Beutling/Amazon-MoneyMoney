@@ -46,6 +46,7 @@ local config={
 
 local const={
   regexOrderCodeNew="([D%d]%d%d%-%d%d%d%d%d%d%d%-%d%d%d%d%d%d%d)",
+  regexPrice="EUR%s+(%d+),(%d%d)",
   str2date = {
     Januar=1,
     Februar=2,
@@ -815,7 +816,11 @@ function getOrderDetails(order)
       if doInsert then
         order.orderSum=0
       end
-      html:xpath('//div[contains(concat(" ", normalize-space(@class), " "), " a-box shipment ")]'):each( function(index,shipment)
+      local shipments=orderDetails:xpath('.//div[contains(concat(" ", normalize-space(@class), " "), " a-box shipment ")]')
+      if shipments:text()=='' then
+        shipments=orderDetails:xpath('./div[contains(concat(" ", normalize-space(@class), " "), " a-box ")]')
+      end
+      shipments:each( function(index,shipment)
         getArticleFromShipment(shipment,order,doInsert)
       end)
       getReturnsFromDetails(orderDetails,order)
