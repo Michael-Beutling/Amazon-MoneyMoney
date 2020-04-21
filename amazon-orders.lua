@@ -31,7 +31,7 @@ local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
 local cacheVersion=9
-local debugBuffer={}
+local debugBuffer={context=''}
 local webCacheLastId=nil
 
 local config={
@@ -189,7 +189,11 @@ function debugBuffer.tablePrint(tbl)
 end
 
 function debugBuffer.print(...)
-  local args={}
+  if debugBuffer.context == nil then
+    debugBuffer.context=''
+  end
+  --local args={debugBuffer.getStack(),debugBuffer.context}
+  local args={debugBuffer.context}
   for _,v in pairs({...}) do
     local n
     if type(v)=='table' then
@@ -202,7 +206,30 @@ function debugBuffer.print(...)
   table.insert(debugBuffer,table.concat(args," "))
 end
 
+function debugBuffer.getStack(skip)
+  local stack={}
+  if skip== nil then
+  skip=3
+  end
+  while debug.getinfo(skip) ~= nil do
+  	table.insert(stack,debug.getinfo(skip).name)
+  	skip=skip+1
+  end
+  
+  return(table.concat(stack,"#"))
+end
+
 function debugBuffer.flush()
+  if io ~= nil and config.debug then
+    local debugFile=io.open("amazon-debug.log","a")
+    if debugFile ~= nil then
+      for i,v in ipairs(debugBuffer) do
+        debugFile:write(v.."\n")
+        debugBuffer[i]=nil
+      end
+      debugFile:close()
+    end
+  end
   for i,v in ipairs(debugBuffer) do
     print(v)
     debugBuffer[i]=nil
@@ -291,7 +318,6 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
         print("webCache id="..webCacheLastId.." read.")
         webCacheHit=true
       end
-    else
       writeCache=false
     end
     if not cached and webCacheHit then
@@ -383,21 +409,21 @@ function RegressionTest.compareTrees(now,master)
       now[k]=0
     end
   end
-  print("differences master")
+  debugBuffer.print("differences master")
   for k,v in pairs(master) do
     if v ~=0 then
-      print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..k)
       differences=differences+1
     end
   end
-  print("differences now")
+  debugBuffer.print("differences now")
   for k,v in pairs(now) do
     if v ~=0 then
-      print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..k)
       differences=differences+1
     end
   end
-  print("differences="..differences)
+  debugBuffer.print("differences="..differences)
   return differences
 end
 
@@ -406,7 +432,7 @@ function RegressionTest.run(transactions,regTestPre)
     local transFile=io.open(regTestPre.."_transactions_master.json",'rb')
     if transFile ~= nil then
 
-      print("run regression test")
+      debugBuffer.print("run regression test")
 
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
@@ -418,7 +444,7 @@ function RegressionTest.run(transactions,regTestPre)
 
 
       local num=RegressionTest.compareTrees(now,master)
-      print("regression test finish")
+      debugBuffer.print("regression test finish")
       table.insert(transactions,{
         name="regression test finish",
         amount = num,
@@ -472,7 +498,8 @@ function getPrice(text)
   if type(text)~='string' then
     return invalidPrice
   end
-  local amountHigh,amountLow=string.match(text,"(%d+),(%d%d)")
+  local amountHigh,amountLow=string.match(text,const.regexPrice)
+  --debugBuffer.print(text,amountHigh,amountLow)
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
   end
@@ -531,27 +558,30 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
 
   if #headData == 3 then
     -- customer account
+    order.orderCode=getOrderCode(headData[3])
+    debugBuffer.context=order.orderCode
     order.bookingDate=getDate(headData[1])
     order.orderTotal=getPrice(headData[2])
-    order.orderCode=getOrderCode(headData[3])
   elseif #headData == 4 then
     -- business account
+    order.orderCode=getOrderCode(headData[4])
+    debugBuffer.context=order.orderCode
     order.bookingDate=getDate(headData[1])
     order.accountNumber=headData[2]
     order.orderTotal=getPrice(headData[3])
-    order.orderCode=getOrderCode(headData[4])
   elseif #headData == 5 then
     -- business account
+    order.orderCode=getOrderCode(headData[5])
+    debugBuffer.context=order.orderCode
     order.bookingDate=getDate(headData[1])
     order.accountNumber=headData[2]
     order.bookingText=headData[3]
     order.orderTotal=getPrice(headData[4])
-    order.orderCode=getOrderCode(headData[5])
   else
     debugBuffer.print("unkown elements",table.concat(headData,"#"))
     return false
   end
-  
+
   -- only business accounts
   local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
   if endToEndReference ~= '' then
@@ -573,7 +603,7 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
       order.orderCode=nil
     end
   end
-  
+
   return order.orderCode ~= nil
 end
 
@@ -773,6 +803,7 @@ end
 -- @return
 --
 function getOrderDetails(order)
+  debugBuffer.context=order.orderCode
   if order.detailsUrl ~= "" then
     --debugBuffer.print("getOrderDetails")
     local html=connectShopWithCheck("GET",order.detailsUrl)
@@ -798,6 +829,7 @@ function getOrderDetails(order)
     -- no handling for digital orders
     order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans in future
   end
+  debugBuffer.context=''
 end
 
 function getOrdersFromSummary(html)
@@ -820,6 +852,7 @@ function getOrdersFromSummary(html)
       end
       orders[order.orderCode]=order
     end
+    debugBuffer.context=''
   end) -- orderbox
   return orders
 end
