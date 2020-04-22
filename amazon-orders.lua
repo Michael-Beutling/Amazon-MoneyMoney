@@ -576,8 +576,8 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     debugBuffer.context=order.orderCode
     order.bookingDate=getDate(headData[1])
     order.accountNumber=headData[2]
-    order.bookingText=headData[3]
-    order.orderTotal=getPrice(headData[4])
+    order.bookingText=headData[4]
+    order.orderTotal=getPrice(headData[3])
   else
     debugBuffer.print("unkown elements",table.concat(headData,"#"))
     return false
