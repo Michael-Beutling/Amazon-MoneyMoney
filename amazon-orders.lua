@@ -30,8 +30,8 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=7
-local debugBuffer={}
+local cacheVersion=9
+local debugBuffer={context=''}
 local webCacheLastId=nil
 
 local config={
@@ -46,6 +46,7 @@ local config={
 
 local const={
   regexOrderCodeNew="([D%d]%d%d%-%d%d%d%d%d%d%d%-%d%d%d%d%d%d%d)",
+  regexPrice="EUR%s+(%d+),(%d%d)",
   str2date = {
     Januar=1,
     Februar=2,
@@ -171,7 +172,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.08,
+WebBanking{version  = 1.09,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -189,7 +190,11 @@ function debugBuffer.tablePrint(tbl)
 end
 
 function debugBuffer.print(...)
-  local args={}
+  if debugBuffer.context == nil then
+    debugBuffer.context=''
+  end
+  --local args={debugBuffer.getStack(),debugBuffer.context}
+  local args={debugBuffer.context}
   for _,v in pairs({...}) do
     local n
     if type(v)=='table' then
@@ -202,7 +207,30 @@ function debugBuffer.print(...)
   table.insert(debugBuffer,table.concat(args," "))
 end
 
+function debugBuffer.getStack(skip)
+  local stack={}
+  if skip== nil then
+  skip=3
+  end
+  while debug.getinfo(skip) ~= nil do
+          table.insert(stack,debug.getinfo(skip).name)
+          skip=skip+1
+  end
+
+  return(table.concat(stack,"#"))
+end
+
 function debugBuffer.flush()
+  if io ~= nil and config.debug then
+    local debugFile=io.open("amazon-debug.log","a")
+    if debugFile ~= nil then
+      for i,v in ipairs(debugBuffer) do
+        debugFile:write(v.."\n")
+        debugBuffer[i]=nil
+      end
+      debugFile:close()
+    end
+  end
   for i,v in ipairs(debugBuffer) do
     print(v)
     debugBuffer[i]=nil
@@ -291,7 +319,6 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
         print("webCache id="..webCacheLastId.." read.")
         webCacheHit=true
       end
-    else
       writeCache=false
     end
     if not cached and webCacheHit then
@@ -383,21 +410,21 @@ function RegressionTest.compareTrees(now,master)
       now[k]=0
     end
   end
-  print("differences master")
+  debugBuffer.print("differences master")
   for k,v in pairs(master) do
     if v ~=0 then
-      print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..k)
       differences=differences+1
     end
   end
-  print("differences now")
+  debugBuffer.print("differences now")
   for k,v in pairs(now) do
     if v ~=0 then
-      print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..k)
       differences=differences+1
     end
   end
-  print("differences="..differences)
+  debugBuffer.print("differences="..differences)
   return differences
 end
 
@@ -406,7 +433,7 @@ function RegressionTest.run(transactions,regTestPre)
     local transFile=io.open(regTestPre.."_transactions_master.json",'rb')
     if transFile ~= nil then
 
-      print("run regression test")
+      debugBuffer.print("run regression test")
 
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
@@ -418,14 +445,22 @@ function RegressionTest.run(transactions,regTestPre)
 
 
       local num=RegressionTest.compareTrees(now,master)
-      print("regression test finish")
+      debugBuffer.print("regression test finish")
       table.insert(transactions,{
         name="regression test finish",
         amount = num,
         bookingDate = os.time(),
-        purpose = "",
+        purpose = 'run '..LocalStorage.loginCounter,
         booked = false,
-
+        accountNumber='accountNumber',
+        bankCode='bankCode',
+        bookingText='bookingText',
+        endToEndReference='endToEndReference',
+        mandateReference='mandateReference',
+        creditorId='creditorId',
+        returnReason='returnReason',
+      --comment='comment\ncomment\n',
+      --category="test"
       })
     end
   end
@@ -464,7 +499,8 @@ function getPrice(text)
   if type(text)~='string' then
     return invalidPrice
   end
-  local amountHigh,amountLow=string.match(text,"(%d+),(%d%d)")
+  local amountHigh,amountLow=string.match(text,const.regexPrice)
+  --debugBuffer.print(text,amountHigh,amountLow)
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
   end
@@ -521,22 +557,44 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     headData[index]=element:text()
   end)
 
-  if #headData >= 3 then
+  if #headData == 3 then
+    -- customer account
+    order.orderCode=getOrderCode(headData[3])
+    debugBuffer.context=order.orderCode
     order.bookingDate=getDate(headData[1])
     order.orderTotal=getPrice(headData[2])
-    order.orderCode=getOrderCode(headData[3])
-
-    if order.bookingDate == invalidDate then
-      order.orderCode=nil
-      return false
-    end
-    if order.orderTotal == invalidPrice then
-      order.orderCode=nil
-    end
+  elseif #headData == 4 then
+    -- business account
+    order.orderCode=getOrderCode(headData[4])
+    debugBuffer.context=order.orderCode
+    order.bookingDate=getDate(headData[1])
+    order.accountNumber=headData[2]
+    order.orderTotal=getPrice(headData[3])
+  elseif #headData == 5 then
+    -- business account
+    order.orderCode=getOrderCode(headData[5])
+    debugBuffer.context=order.orderCode
+    order.bookingDate=getDate(headData[1])
+    order.accountNumber=headData[2]
+    order.bookingText=headData[4]
+    order.orderTotal=getPrice(headData[3])
+  else
+    debugBuffer.print("unkown elements",table.concat(headData,"#"))
+    return false
   end
 
-  if order.orderCode == nil then
-    return false
+  -- only business accounts
+  local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
+  if endToEndReference ~= '' then
+    order.endToEndReference=endToEndReference
+  end
+
+  if order.bookingDate == invalidDate then
+    order.orderCode=nil
+  end
+
+  if order.orderTotal == invalidPrice then
+    order.orderCode=nil
   end
 
   order.detailsUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/order-details/")]'):attr('href')
@@ -544,11 +602,10 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
     order.digitalUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/digital/")]'):attr('href')
     if order.digitalUrl == "" then
       order.orderCode=nil
-      return false
     end
   end
 
-  return true
+  return order.orderCode ~= nil
 end
 
 function isShipmentShorted(shipment)
@@ -569,9 +626,10 @@ end
 -- @field #string detailsUrl
 -- @field #string digitalUrl
 -- @field #list<#orderPosition> orderPositions
--- @field #boolean summaryShorted not all acticles in the summary shown
 -- @field #boolean invalidArticles
 -- @field #number detailsDate
+-- @field #string accountNumber
+-- @field #string endToEndReference
 
 --- @type totals
 -- @field  #number orderTotal Sum of order showed by Amazon
@@ -718,11 +776,35 @@ function getRefundTransActions(orderDetails,order)
 end
 
 
+--- @function getOrderaddress
+-- @param #table html
+-- @param #order order
+-- @return
+--
+
+function getOrderaddress(orderDetails,order)
+  if order.endToEndReference == nil then
+    local name=orderDetails:xpath('//div[contains(@class,"od-shipping-address-container")]//div[@class="a-row"]'):text()
+    local address=orderDetails:xpath('//div[contains(@class,"od-shipping-address-container")]//div[@class="displayAddressDiv"]'):text()
+
+    if name ~='' and address ~= '' then
+      name=name.." "..address
+    elseif name == '' then
+      name=address
+    end
+
+    if name ~= '' then
+      order.endToEndReference=name
+    end
+  end
+end
+
 --- @function getOrderDetails
 -- @param #order order
 -- @return
 --
 function getOrderDetails(order)
+  debugBuffer.context=order.orderCode
   if order.detailsUrl ~= "" then
     --debugBuffer.print("getOrderDetails")
     local html=connectShopWithCheck("GET",order.detailsUrl)
@@ -734,19 +816,25 @@ function getOrderDetails(order)
       if doInsert then
         order.orderSum=0
       end
-      html:xpath('//div[contains(concat(" ", normalize-space(@class), " "), " a-box shipment ")]'):each( function(index,shipment)
+      local shipments=orderDetails:xpath('.//div[contains(concat(" ", normalize-space(@class), " "), " a-box shipment ")]')
+      if shipments:text()=='' then
+        shipments=orderDetails:xpath('./div[contains(concat(" ", normalize-space(@class), " "), " a-box ")]')
+      end
+      shipments:each( function(index,shipment)
         getArticleFromShipment(shipment,order,doInsert)
       end)
       getReturnsFromDetails(orderDetails,order)
       getRefundTransActions(orderDetails,order)
+      getOrderaddress(orderDetails,order)
       order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans randomly in future
     else
-      -- debugBuffer.print("getOrderDetails not details",order.orderCode)
+      debugBuffer.print("getOrderDetails no details",order.orderCode)
     end
   else
     -- no handling for digital orders
     order.detailsDate=os.time()+math.floor((math.random()*90+90)*24*60*60) -- distribute rescans in future
   end
+  debugBuffer.context=''
 end
 
 function getOrdersFromSummary(html)
@@ -769,6 +857,7 @@ function getOrdersFromSummary(html)
       end
       orders[order.orderCode]=order
     end
+    debugBuffer.context=''
   end) -- orderbox
   return orders
 end
@@ -1051,6 +1140,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
+      aName=html:xpath('//span[@class="abnav-accountfor"]'):text()
+      aName=string.gsub(aName,"Konto für ","")
+    end
+    if aName == "" then
       aName="Unkown"
       -- print("can't get username, new layout?")
     else
@@ -1109,6 +1202,7 @@ function RefreshAccount (account, since)
     regTestPre="mix"
   end
   print("Refresh",account.accountNumber)
+
   if LocalStorage.getOrders[account.accountNumber] == false or LocalStorage.getOrders[account.accountNumber] == nil then
     LocalStorage.getOrders[account.accountNumber]=true
 
@@ -1241,6 +1335,9 @@ function RefreshAccount (account, since)
           amount = position.amount/divisor*position.qty,
           bookingDate = order.bookingDate+1,
           purpose = MM.toEncoding(const.fixEncoding,position.purpose),
+          endToEndReference = order.endToEndReference,
+          accountNumber = order.accountNumber,
+          bookingText=order.bookingText,
         })
       end
 
@@ -1250,6 +1347,9 @@ function RefreshAccount (account, since)
           amount = (order.orderTotal-order.orderSum)/divisor,
           bookingDate = order.bookingDate,
           purpose = const.differenceText,
+          endToEndReference = order.endToEndReference,
+          accountNumber = order.accountNumber,
+          bookingText=order.bookingText,
         })
       end
 
@@ -1260,6 +1360,9 @@ function RefreshAccount (account, since)
             amount = order.orderTotal/divisor*-1,
             bookingDate = order.bookingDate,
             purpose = const.contra..orderCode,
+            endToEndReference = order.endToEndReference,
+            accountNumber = order.accountNumber,
+            bookingText=order.bookingText,
           })
         end
       end
@@ -1283,6 +1386,9 @@ function RefreshAccount (account, since)
               amount = amount/divisor*-1,
               bookingDate = bookingDate,
               purpose = const.refundTransaction..orderCode,
+              endToEndReference = order.endToEndReference,
+              accountNumber = order.accountNumber,
+              bookingText=order.bookingText,
             })
             if mixed then
               table.insert(transactions,{
@@ -1290,6 +1396,9 @@ function RefreshAccount (account, since)
                 amount = amount/divisor,
                 bookingDate = bookingDate,
                 purpose = const.refundTransactionContra..orderCode,
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
             end
           end
@@ -1314,12 +1423,18 @@ function RefreshAccount (account, since)
                 amount = amount/divisor*-1,
                 bookingDate = bookingDate,
                 purpose = MM.toEncoding(const.fixEncoding,const.returnText..purpose),
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
               table.insert(transactions,{
                 name=orderCode,
                 amount = amount/divisor,
                 bookingDate = bookingDate,
                 purpose = MM.toEncoding(const.fixEncoding,const.returnTextContra..purpose),
+                endToEndReference = order.endToEndReference,
+                accountNumber = order.accountNumber,
+                bookingText=order.bookingText,
               })
             end
           end
@@ -1335,6 +1450,12 @@ function RefreshAccount (account, since)
   if webCache then
     for _,v in pairs(transactions) do
       v.booked=false
+    end
+  end
+
+  for _,v in pairs(transactions) do
+    if v.accountNumber == nil then
+      v.accountNumber=account.owner
     end
   end
 
@@ -1357,4 +1478,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFGjgxF92l4AzU5VZKqpQ8QHAod0fAhUAjNGEv1TlmLS0QjKsnRT3qmeLCdI=
+-- SIGNATURE: MCwCFCTsyiKNFCBSrQRMlHqeHSalAaVfAhQ4evGLVcyaPBaSvOCe7EShW/2c7w==
