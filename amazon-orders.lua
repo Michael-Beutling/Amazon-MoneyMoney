@@ -1198,6 +1198,40 @@ function RefreshAccount (account, since)
 
   webCacheState='RefreshAccount'
 
+  if type(account.attributes) == 'table' then
+    for k,v in pairs(account.attributes) do
+      print("attribut",k,config[k])
+      if type(config[k]) == 'boolean' then
+        if v == 'true' then
+          print("set config",k,"= true")
+          config[k]=true
+        else
+          print("set config",k,"= true")
+          config[k]=false
+        end
+      end
+      if type(const[k]) == 'string' then
+        print("const k=",v)
+        const[k]=v      
+      end
+      if k == 'resetCache' and v ~= LocalStorage.resetCache then
+        LocalStorage.OrderCache={}
+        LocalStorage.orderFilterCache={}
+        LocalStorage.invalidCache={}
+        LocalStorage.resetCache=v
+        return {balance=0, transactions={[1]=
+          {
+              name="Cache reset, please reload!",
+              amount = 0,
+              bookingDate = now,
+              purpose = "... and drink a coffee :)",
+              booked = false,
+            }
+          }}
+      end
+    end
+  end
+
   local divisor=-100
   if account.accountNumber == "inverse" then
     divisor=100
