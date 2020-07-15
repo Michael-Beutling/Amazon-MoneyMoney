@@ -72,6 +72,9 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
+  monthlyContra="monthy contra",
+  yearlyContra="yearly contra",
+  daysByMonth={31,28,31,30,31,30,31,31,30,31,30,31}
 }
 
 function mergeConfig(default,read)
@@ -172,7 +175,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.09,
+WebBanking{version  = 1.10,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -975,6 +978,22 @@ function getMessageList(since)
   return orderIds
 end
 
+function getLastDayOfPeriod(period)
+  local year=string.match(period,"(%d%d%d%d)")
+  local month=string.match(period,"-(%d%d)")
+  --debugBuffer.print("getLastDayOfPeriod",period,year,month)
+  if month == nil then
+    month="12"
+  end
+  year=tonumber(year)
+  month=tonumber(month)
+  local day=const.daysByMonth[month]
+  if month == 2 and (year%4) == 0 and ((year%400)==0 or (year%100)~=0) then
+    day=29
+  end
+  return os.time{year=year,month=month,day=day}
+end
+
 function SupportsBank (protocol, bankCode)
   return protocol == ProtocolWebBanking and "Amazon Orders" == bankCode:sub(1,#"Amazon Orders")
 end
@@ -1023,6 +1042,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
           LocalStorage.OrderCache={}
           LocalStorage.orderFilterCache={}
           LocalStorage.newestMessage=0
+          LocalStorage.balancesByPeriod={}
         end
       end
     end
@@ -1163,44 +1183,79 @@ function ListAccounts (knownAccounts)
   if aName == nil or aName== "" then
     name=secUsername
   end
-  LocalStorage.getOrders['mix']=false
-  LocalStorage.getOrders['normal']=false
-  LocalStorage.getOrders['inverse']=false
-  return {[1]={
-    name = "Amazon "..name,
-    owner = secUsername,
-    accountNumber="mix",
-    type = AccountTypeOther
-  },[2]={
-    name = "Amazon "..name,
-    owner = secUsername,
-    accountNumber="normal",
-    type = AccountTypeOther
-  },[3]={
-    name = "Amazon "..name,
-    owner = secUsername,
-    accountNumber="inverse",
-    type = AccountTypeOther
-  }}
+  local accounts={}
+  for _,i in pairs({"mix","normal","inverse","monthly","yearly"}) do
+    table.insert(accounts,{ name = "Amazon "..name, owner = secUsername, accountNumber=i, type = AccountTypeOther})
+    LocalStorage.getOrders[i]=false
+  end
+  return accounts
 end
 
 function RefreshAccount (account, since)
   local mixed=false
+  local periodly=false
   local now=os.time()
 
   webCacheState='RefreshAccount'
-  local regTestPre="normal"
+
+  if type(account.attributes) == 'table' then
+    for k,v in pairs(account.attributes) do
+      print("attribut",k,config[k])
+      if type(config[k]) == 'boolean' then
+        if v == 'true' then
+          print("set config",k,"= true")
+          config[k]=true
+        else
+          print("set config",k,"= true")
+          config[k]=false
+        end
+      end
+      if type(const[k]) == 'string' then
+        print("const k=",v)
+        const[k]=v
+      end
+      if k == 'resetCache' and v ~= LocalStorage.resetCache then
+        LocalStorage.OrderCache={}
+        LocalStorage.orderFilterCache={}
+        LocalStorage.invalidCache={}
+        LocalStorage.resetCache=v
+        return {balance=0, transactions={[1]=
+          {
+              name="Cache reset, please reload!",
+              amount = 0,
+              bookingDate = now,
+              purpose = "... and drink a coffee :)",
+              booked = false,
+            }
+          }}
+      end
+    end
+  end
 
   local divisor=-100
   if account.accountNumber == "inverse" then
     divisor=100
-    regTestPre="inverse"
   end
 
   if account.accountNumber == "mix" then
     mixed=true
-    regTestPre="mix"
   end
+
+  local periodFmt
+  local periodContra
+  if account.accountNumber == "monthly" then
+    mixed=true
+    periodly=true
+    periodFmt="%Y-%m"
+    periodContra=const.monthlyContra
+  end
+  if account.accountNumber == "yearly" then
+    mixed=true
+    periodly=true
+    periodFmt="%Y"
+    periodContra=const.yearlyContra
+  end
+
   print("Refresh",account.accountNumber)
 
   if LocalStorage.getOrders[account.accountNumber] == false or LocalStorage.getOrders[account.accountNumber] == nil then
@@ -1318,6 +1373,7 @@ function RefreshAccount (account, since)
   end
 
   local balance=0
+  local balancesByPeriod={}
   for orderCode,order in pairs(LocalStorage.OrderCache) do
 
     -- orderPositions,{purpose=purpose,amount=amount,qty=qty})
@@ -1328,7 +1384,22 @@ function RefreshAccount (account, since)
       order.since=now
     end
 
-    if order.since >= since then
+    local report=order.since >= since
+
+    if periodly then
+      local period=os.date(periodFmt,order.bookingDate)
+      if balancesByPeriod[period] == nil then
+        balancesByPeriod[period] = {report=true,balance=order.orderTotal}
+      else
+        balancesByPeriod[period].balance=balancesByPeriod[period].balance+order.orderTotal
+      end
+      if not report then
+        balancesByPeriod[period].report=false
+      end
+    end
+
+
+    if report then
       for index,position in pairs(order.orderPositions) do
         table.insert(transactions,{
           name=orderCode,
@@ -1353,7 +1424,7 @@ function RefreshAccount (account, since)
         })
       end
 
-      if mixed and order.orderTotal ~= 0 then
+      if mixed and order.orderTotal ~= 0 and not periodly then
         if order.since >= since then
           table.insert(transactions,{
             name=orderCode,
@@ -1371,6 +1442,11 @@ function RefreshAccount (account, since)
     -- makeBranch(order,{'refundTransactions',bookingDate,amount})
     if order.refundTransactions ~= nil then
       for bookingDate,v in pairs(order.refundTransactions) do
+
+        local period=os.date(periodFmt,bookingDate)
+        if balancesByPeriod[period] == nil then
+          balancesByPeriod[period] = {report=true,balance=0}
+        end
         for amount,v in pairs(v) do
 
           if not mixed then
@@ -1380,6 +1456,16 @@ function RefreshAccount (account, since)
           if v.since== nil then
             v.since=now
           end
+
+          local report=v.since >= since
+
+          if periodly then
+            balancesByPeriod[period].balance=balancesByPeriod[period].balance-amount
+            if not report then
+              balancesByPeriod[period].report=false
+            end
+          end
+
           if v.since >= since then
             table.insert(transactions,{
               name=orderCode,
@@ -1390,7 +1476,7 @@ function RefreshAccount (account, since)
               accountNumber = order.accountNumber,
               bookingText=order.bookingText,
             })
-            if mixed then
+            if mixed and not periodly then
               table.insert(transactions,{
                 name=orderCode,
                 amount = amount/divisor,
@@ -1411,9 +1497,9 @@ function RefreshAccount (account, since)
       for bookingDate,v in pairs(order.returns) do
         for amount,v in pairs(v) do
           for purpose,v in pairs(v) do
-            if not mixed then
-              balance=balance-amount
-            end
+            -- if not mixed then
+            --   balance=balance-amount
+            -- end
             if v.since== nil then
               v.since=now
             end
@@ -1443,7 +1529,56 @@ function RefreshAccount (account, since)
     end
   end
 
-  RegressionTest.run(transactions,regTestPre)
+  if periodly then
+    if LocalStorage.balancesByPeriod == nil then
+      LocalStorage.balancesByPeriod={}
+    end
+    local lastPeriod=""
+
+    for k,v in pairs(balancesByPeriod) do
+      if lastPeriod<k then
+        lastPeriod=k
+       end
+       -- debugBuffer.print(k)
+    end
+
+    -- debugBuffer.print("lastPeriod=",lastPeriod)
+
+    for k,v in pairs(balancesByPeriod) do
+      if v.report then
+        if k == lastPeriod then
+          LocalStorage.balancesByPeriod[k]={v.balance}
+        else
+          if LocalStorage.balancesByPeriod[k] == nil then
+            LocalStorage.balancesByPeriod[k]={}
+          end
+          local sum=0
+          for _,v in  ipairs(LocalStorage.balancesByPeriod[k]) do
+            sum=sum+v
+          end
+          if sum ~= v.balance then
+            table.insert(LocalStorage.balancesByPeriod[k],v.balance-sum)
+          end
+        end
+        for _,v in  ipairs(LocalStorage.balancesByPeriod[k]) do
+              table.insert(transactions,{
+                name=k,
+                amount = v/divisor*-1,
+                bookingDate = getLastDayOfPeriod(k),
+                purpose = periodContra,
+                booked= k~=lastPeriod,
+              })
+              if k == lastPeriod then
+                balance=v
+              end
+          -- debugBuffer.print(k,v,getLastDayOfPeriod(k))
+        end
+      end
+    end
+  end
+
+  print(balance)
+  RegressionTest.run(transactions,account.accountNumber)
 
   debugBuffer.flush()
 
@@ -1478,4 +1613,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MCwCFCTsyiKNFCBSrQRMlHqeHSalAaVfAhQ4evGLVcyaPBaSvOCe7EShW/2c7w==
+-- SIGNATURE: MCwCFAUa2PBh4FRImiIv2ekBhBGOSV5SAhR26S7YhsX01UxaD4161i5cuChBdw==
