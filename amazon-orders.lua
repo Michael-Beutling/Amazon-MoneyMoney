@@ -175,7 +175,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.09,
+WebBanking{version  = 1.10,
   url         = baseurl,
   services    = const.services,
   description = const.description}
