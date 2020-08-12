@@ -49,17 +49,25 @@ local const={
   regexPrice="EUR%s+(%d+),(%d%d)",
   str2date = {
     Januar=1,
+    January=1,
     Februar=2,
+    February=2,
     ["März"]=3,
+    March=3,
     April=4,
     Mai=5,
+    May=5,
     Juni=6,
+    June=6,
     Juli=7,
+    July=7,
     August=8,
     September=9,
     Oktober=10,
+    October=10,
     November=11,
-    Dezember=12
+    Dezember=12,
+    December=12
   },
   domain='.amazon.de',
   services    = {"Amazon Orders"},
@@ -175,7 +183,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.10,
+WebBanking{version  = 1.11,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -490,11 +498,14 @@ function getDate(text)
     return invalidDate
   end
   local day,month,year=string.match(text,"(%d+)%.%s+([%S]+)%s+(%d+)")
+  if day == nil then
+    day,month,year=string.match(text,"(%d+)%s+([%S]+)%s+(%d+)")
+  end
   local month=const.str2date[month]
   if month ~= nil then
     return os.time({year=year,month=month,day=day})
   end
-  --error(text)
+  error(text)
   return invalidDate -- error value
 end
 
@@ -1298,7 +1309,7 @@ function RefreshAccount (account, since)
       local orderFilterVal=element:attr('value')
       local foundOrders=true
       local foundNewOrders=false
-      if LocalStorage.orderFilterCache[orderFilterVal] == nil then
+      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
         html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
@@ -1320,7 +1331,7 @@ function RefreshAccount (account, since)
             foundEnd=true
           end
         until foundEnd
-        if orderFilterVal ~= 'months-6' and not foundNewOrders and foundOrders then
+        if not foundNewOrders and foundOrders then
           LocalStorage.orderFilterCache[orderFilterVal]=true
           --print("orderFilter="..orderFilterVal.." cached")
         end
@@ -1577,7 +1588,7 @@ function RefreshAccount (account, since)
     end
   end
 
-  print(balance)
+  --print(balance)
   RegressionTest.run(transactions,account.accountNumber)
 
   debugBuffer.flush()
@@ -1613,4 +1624,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MCwCFAUa2PBh4FRImiIv2ekBhBGOSV5SAhR26S7YhsX01UxaD4161i5cuChBdw==
+-- SIGNATURE: MCwCFF3UTJkpry5aBvoISMKJWM5zgJF7AhREa9S4dGV0Yrfhu8lHGqLHKWhCDA==
