@@ -183,7 +183,7 @@ if config.debug then print('debugging...') end
 
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.11,
+WebBanking{version  = 1.12,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -505,7 +505,7 @@ function getDate(text)
   if month ~= nil then
     return os.time({year=year,month=month,day=day})
   end
-  error(text)
+  --error(text)
   return invalidDate -- error value
 end
 
