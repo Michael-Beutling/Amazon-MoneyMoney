@@ -80,6 +80,7 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
+  orderListLink='/gp/your-account/order-history?unifiedOrders=1',
   monthlyContra="monthy contra",
   yearlyContra="yearly contra",
   daysByMonth={31,28,31,30,31,30,31,31,30,31,30,31}
@@ -180,10 +181,12 @@ end
 
 print(((io == nil or io.open == nil) and 'signed ' or '')  .. const.services[1],"plugin loaded...")
 if config.debug then print('debugging...') end
-
+if debug ~= nil then
+  print("lua debug is usable")
+end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.12,
+WebBanking{version  = 1.13,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -1009,6 +1012,15 @@ function SupportsBank (protocol, bankCode)
   return protocol == ProtocolWebBanking and "Amazon Orders" == bankCode:sub(1,#"Amazon Orders")
 end
 
+function enterOrderList ()
+  --print("enterOrderList")
+  html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
+  if html == nil then
+    print("work-around, see issue #21")
+    html=connectShop("GET",baseurl..const.orderListLink)
+  end
+end
+
 function enterCredentials(state)
   webCacheState=state
   local xpform='//*[@name="signIn"]'
@@ -1019,13 +1031,31 @@ function enterCredentials(state)
     html= connectShop(html:xpath(xpform):submit())
     if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
       print("skip phone dialog...")
-      html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
+      enterOrderList()
     end
   end
 end
 
 function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- Login.
+  if type(LocalStorage.patcher) == 'table' then
+    for k,v in pairs(LocalStorage.patcher) do
+      print("attribut",k,v)
+      if type(config[k]) == 'boolean' then
+        if v == 'true' then
+          print("set config",k,"= true")
+          config[k]=true
+        else
+          print("set config",k,"= true")
+          config[k]=false
+        end
+      end
+      if type(const[k]) == 'string' then
+        print("const k=",v)
+        const[k]=v
+      end
+    end
+  end
   if step==1 then
     if LocalStorage.getOrders == nil then
       LocalStorage.getOrders={}
@@ -1058,7 +1088,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       end
     end
     html = connectShop("GET",baseurl)
-    html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
+    enterOrderList()
 
     enterCredentials('1.login')
   end
@@ -1210,8 +1240,10 @@ function RefreshAccount (account, since)
   webCacheState='RefreshAccount'
 
   if type(account.attributes) == 'table' then
+    LocalStorage.patcher={}
     for k,v in pairs(account.attributes) do
-      print("attribut",k,config[k])
+      print("attribut",k,v)
+      LocalStorage.patcher[k]=v
       if type(config[k]) == 'boolean' then
         if v == 'true' then
           print("set config",k,"= true")
@@ -1290,7 +1322,7 @@ function RefreshAccount (account, since)
     html=connectShop("GET",baseurl)
 
     -- Bestellungen
-    html= connectShop(html:xpath(const.xpathOrderHistoryLink):click())
+    enterOrderList()
 
     if LocalStorage.OrderCache == nil then
       LocalStorage.OrderCache={}
@@ -1624,4 +1656,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFHFl2VJyu6qsyclqnGUipuArP78qAhUAjWZOnbfbq+xJz8KHXZt7Wm6/pT4=
+-- SIGNATURE: MC0CFQCGGujwk30LSvvA/wjsHt9rT4fncwIUWD5bllIc3uz80JuJbxvnpaOg/3A=
