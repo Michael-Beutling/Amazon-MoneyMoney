@@ -41,6 +41,7 @@ local config={
   cleanOrdersCache=false,
   cleanFilterCache=false,
   cleanInvalidCache=false,
+  noRefresh=false,
   debug=false,
 }
 
@@ -186,7 +187,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.13,
+WebBanking{version  = 1.14,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -1036,6 +1037,10 @@ function enterCredentials(state)
   end
 end
 
+function endsWith(string,ending)
+  return string:sub(-#ending) == ending
+end
+
 function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- Login.
   if type(LocalStorage.patcher) == 'table' then
@@ -1092,6 +1097,69 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
     enterCredentials('1.login')
   end
+  
+  -- auth select
+  --
+  
+  local authSelect=html:xpath('//form[@id="auth-select-device-form"]')
+  if authSelect:text() ~= ''  then
+    -- name="otpDeviceContext"
+    local otpDeviceContext=''
+    local score=-1000
+    html:xpath('//input[@type="radio"]'):each(function (index,element)
+      local k=element:attr('value')
+      print(k)
+      local v=0
+      if endsWith(k,'TOPT') then
+        v=10
+      end
+      if endsWith(k,'VOICE') then
+        v=-10
+      end
+      if endsWith(k,'SMS') then
+        v=5
+      end
+      if score<v then
+        otpDeviceContext=k
+        score=v
+      end
+    end)
+    html:xpath('//input[@type="radio"]'):each(function (index,element)
+      if element:attr('value') == otpDeviceContext then
+        element:attr('checked','checked')
+      else
+        element:attr('checked','')
+      end
+    end) 
+    html=connectShop(authSelect:submit())
+  end
+  
+  -- new captcha?
+  -- ('//form[@action="/errors/validateCaptcha"]')
+  -- ('//form[@action="/errors/validateCaptcha"]//img')
+  -- ('//input[@id="captchacharacters"]')
+
+  -- local captcha=html:xpath('//form[@action="/errors/validateCaptcha"]')
+  -- if captcha:text() ~= "" then
+  --   -- untested...
+  --   print("untested ****************************")
+  --   if config.debug then print("login new captcha") end
+  --   if captcha1run then
+  --     local pic=connectShopRaw("GET",captcha:xpath('.//img'):attr('src'))
+  --     captcha1run=false
+  --     return {
+  --       title=captcha:xpath('.//label'):text(),
+  --       challenge=pic,
+  --       label=captcha:xpath('.//form//h4'):text()
+  --     }
+  --   else
+  --     captcha:xpath('.//input[@id="captchacharacters"]'):attr("value",credentials[1])
+  --     html=connectShop(captcha:submit())
+  --     enterCredentials('new captcha')
+  --     captcha1run=true
+  --   end
+  -- end
+  -- 
 
   -- Captcha
   --
@@ -1317,7 +1385,7 @@ function RefreshAccount (account, since)
 
   local transactions={}
 
-  if LocalStorage.loginCounter ~= LocalStorage.lastLoginCounter then
+  if LocalStorage.loginCounter ~= LocalStorage.lastLoginCounter and not config.noRefresh then
 
     html=connectShop("GET",baseurl)
 
