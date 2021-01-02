@@ -1108,9 +1108,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     local score=-1000
     html:xpath('//input[@type="radio"]'):each(function (index,element)
       local k=element:attr('value')
-      print(k)
       local v=0
-      if endsWith(k,'TOPT') then
+      if endsWith(k,'TOTP') then
         v=10
       end
       if endsWith(k,'VOICE') then
