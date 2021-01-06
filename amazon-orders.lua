@@ -44,6 +44,7 @@ local config={
   noRefresh=false,
   debug=false,
   forceCaptcha=false,
+  limitOrders=250,
 }
 
 local const={
@@ -1082,6 +1083,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
         print("webcache on")
+        config.limitOrders=1e99
         local temp=webCacheFolder.."/cleanLocalStorage"
         local cleanLocalStorage=os.rename(temp,temp) and true or false
         if cleanLocalStorage then
@@ -1431,11 +1433,12 @@ function RefreshAccount (account, since)
     end
 
     local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    local numbersOfNewOrders=0
     orderFilterSelect:each(function(index,element)
       local orderFilterVal=element:attr('value')
       local foundOrders=true
       local foundNewOrders=false
-      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil then
+      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
         html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
@@ -1448,6 +1451,7 @@ function RefreshAccount (account, since)
             if LocalStorage.OrderCache[k]==nil then
               LocalStorage.OrderCache[k]=v
               foundNewOrders=true
+              numbersOfNewOrders=numbersOfNewOrders+1
             end
           end
           local nextPage=html:xpath('//li[@class="a-last"]/a[@href]')
@@ -1493,11 +1497,22 @@ function RefreshAccount (account, since)
         ordersTotal=ordersTotal+1
       end
     end
-
+    
+    if ordersTotal>config.limitOrders then
+      ordersTotal=config.limitOrders
+      table.insert(transactions,{
+        name="There are still more orders left...",
+        amount = 0,
+        bookingDate = now,
+        purpose = "Please reload...",
+        booked = false,
+      })
+    end
+    
     -- get order details from order details page
 
     for orderCode,order in pairs(LocalStorage.OrderCache) do
-      if order.detailsDate < now then
+      if order.detailsDate < now and ordersCounter<config.limitOrders then
         ordersCounter=ordersCounter+1
         MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
         getOrderDetails(order)
