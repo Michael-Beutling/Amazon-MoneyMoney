@@ -43,6 +43,7 @@ local config={
   cleanInvalidCache=false,
   noRefresh=false,
   debug=false,
+  forceCaptcha=false,
 }
 
 local const={
@@ -1051,7 +1052,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
           print("set config",k,"= true")
           config[k]=true
         else
-          print("set config",k,"= true")
+          print("set config",k,"= false")
           config[k]=false
         end
       end
@@ -1094,8 +1095,13 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     end
     html = connectShop("GET",baseurl)
     enterOrderList()
-
+    if config.forceCaptcha then
+      secPassword=credentials[2].."a"
+    end
     enterCredentials('1.login')
+    if config.forceCaptcha then
+      secPassword=credentials[2]
+    end
   end
   
   -- auth select
@@ -1106,7 +1112,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     -- name="otpDeviceContext"
     local otpDeviceContext=''
     local score=-1000
-    html:xpath('//input[@type="radio"]'):each(function (index,element)
+    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
       local k=element:attr('value')
       local v=0
       if endsWith(k,'TOTP') then
@@ -1123,9 +1129,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
         score=v
       end
     end)
-    html:xpath('//input[@type="radio"]'):each(function (index,element)
+    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
       if element:attr('value') == otpDeviceContext then
         element:attr('checked','checked')
+        print("select "..element:xpath('..'):text())
       else
         element:attr('checked','')
       end
@@ -1316,7 +1323,7 @@ function RefreshAccount (account, since)
           print("set config",k,"= true")
           config[k]=true
         else
-          print("set config",k,"= true")
+          print("set config",k,"= false")
           config[k]=false
         end
       end
