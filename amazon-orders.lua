@@ -1103,6 +1103,26 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       secPassword=credentials[2]
     end
   end
+   -- Account selector
+  -- https://www.amazon.de/ap/cvf/request.embed?arb=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30
+  -- arb= $x('//div[@data-arbtoken]')
+  -- $x('//div[@id="authportal-main-section"]')
+  -- 
+  local arbToken=html:xpath('//div[@data-arbtoken]'):attr('data-arbtoken')
+  if arbToken ~= '' then
+    print('Account selector arbToken='..arbToken)
+    html=connectShop('GET','https://www.amazon.de/ap/cvf/request.embed?arb='..arbToken..'&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30')
+    -- work-a-round simple add new login
+    local signInLink=html:xpath('//a[@id="cvf-account-switcher-add-accounts-link"]'):attr('href')
+    print('signInLink='..signInLink)
+    if signInLink ~= '' then
+      html=connectShop('GET',signInLink)
+      enterCredentials('after Account selector')
+    end 
+  end
+  
+  
+  
   
   -- auth select
   --
