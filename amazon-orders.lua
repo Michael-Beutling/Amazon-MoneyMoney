@@ -1,6 +1,6 @@
 -- Amazon Plugin for https://moneymoney-app.com
 --
--- Copyright 2019-2020 Michael Beutling
+-- Copyright 2019-2021 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -1024,21 +1024,6 @@ function enterOrderList ()
   end
 end
 
-function enterCredentials(state)
-  webCacheState=state
-  local xpform='//*[@name="signIn"]'
-  if html:xpath(xpform):attr("name") ~= '' then
-    print("enter username/password")
-    html:xpath('//*[@name="email"]'):attr("value", secUsername)
-    html:xpath('//*[@name="password"]'):attr("value",secPassword)
-    html= connectShop(html:xpath(xpform):submit())
-    if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
-      print("skip phone dialog...")
-      enterOrderList()
-    end
-  end
-end
-
 function endsWith(string,ending)
   return string:sub(-#ending) == ending
 end
@@ -1100,11 +1085,39 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     if config.forceCaptcha then
       secPassword=credentials[2].."a"
     end
-    enterCredentials('1.login')
-    if config.forceCaptcha then
-      secPassword=credentials[2]
-    end
   end
+  
+  local leaveLoginLoop
+  local loginLoops=1
+  repeat
+    leaveLoginLoop=true
+    webCacheState="login"..loginLoops
+    print("login "..loginLoops..". try")
+
+  -- authlink
+  -- 
+  -- $x('//form[@id="pollingForm"]')
+  -- $x('//input[@name="transactionApprovalStatus"]')
+  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionPending">
+  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionCompleted"> 
+  -- 
+  
+   local authLink=html:xpath('//form[@id="pollingForm"]')
+   if authLink:attr('id') ~='' then
+     print("auth link sended")
+     local waitUntil=os.time()+300
+     local poll
+     repeat
+        MM.printStatus("waiting for auth confirmation, "..math.floor(waitUntil-os.time()).." seconds left")
+        MM.sleep(3)
+        poll=connectShop(authLink:submit()):xpath('//input[@name="transactionApprovalStatus"]'):attr('value')
+        print("poll="..poll)
+     until( poll == 'TransactionCompleted' or waitUntil<os.time())
+     enterOrderList()
+   end
+   
+  
+  
    -- Account selector
   -- https://www.amazon.de/ap/cvf/request.embed?arb=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30
   -- arb= $x('//div[@data-arbtoken]')
@@ -1112,25 +1125,26 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- 
   local arbToken=html:xpath('//div[@data-arbtoken]'):attr('data-arbtoken')
   if arbToken ~= '' then
+    print("account selector")
+    leaveLoginLoop=false
     print('Account selector arbToken='..arbToken)
     html=connectShop('GET','https://www.amazon.de/ap/cvf/request.embed?arb='..arbToken..'&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30')
+    leaveLoginLoop=false
     -- work-a-round simple add new login
     local signInLink=html:xpath('//a[@id="cvf-account-switcher-add-accounts-link"]'):attr('href')
     print('signInLink='..signInLink)
     if signInLink ~= '' then
       html=connectShop('GET',signInLink)
-      enterCredentials('after Account selector')
     end 
   end
-  
-  
-  
   
   -- auth select
   --
   
   local authSelect=html:xpath('//form[@id="auth-select-device-form"]')
   if authSelect:text() ~= ''  then
+    print("auth selector")
+    leaveLoginLoop=false
     -- name="otpDeviceContext"
     local otpDeviceContext=''
     local score=-1000
@@ -1169,6 +1183,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
   -- local captcha=html:xpath('//form[@action="/errors/validateCaptcha"]')
   -- if captcha:text() ~= "" then
+  --     leaveLoginLoop=false
   --   -- untested...
   --   print("untested ****************************")
   --   if config.debug then print("login new captcha") end
@@ -1183,7 +1198,6 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   --   else
   --     captcha:xpath('.//input[@id="captchacharacters"]'):attr("value",credentials[1])
   --     html=connectShop(captcha:submit())
-  --     enterCredentials('new captcha')
   --     captcha1run=true
   --   end
   -- end
@@ -1194,10 +1208,16 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
   --div id="image-captcha-section"
   if captcha ~= "" then
+    print("captcha")
+    leaveLoginLoop=false
     if config.debug then print("login captcha") end
     if captcha1run then
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
+      if config.forceCaptcha then
+         print('set correct password')
+         secPassword=credentials[2]
+      end
       return {
         title=html:xpath('//li'):text(),
         challenge=pic,
@@ -1207,16 +1227,15 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
       -- checkbox
       html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
-      enterCredentials('captcha')
       captcha1run=true
     end
   end
 
-  enterCredentials('after captcha')
-
   -- passcode
 
   if html:xpath('//form[@name="claimspicker"]'):text() ~= ''  then
+    print("passcode")
+    leaveLoginLoop=false
     local text=''
     local number=0
     local passcode1run=true
@@ -1267,6 +1286,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
   -- passcode part 2
   if html:xpath('//form[@action="verify"]'):text() ~= '' then
+    print("passcode part 2")
+    leaveLoginLoop=false
     if config.debug then print("passcode 2. part") end
     html:xpath('//*[@name="code"]'):attr("value",credentials[1])
     html= connectShop(html:xpath('//form[@action="verify"]'):submit())
@@ -1275,6 +1296,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- 2.FA
   local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
   if mfatext ~= "" then
+    print("multi factor auth")
+    leaveLoginLoop=false
     if config.debug then print("login mfa") end
     if mfa1run then
       -- print("mfa="..mfatext)
@@ -1292,9 +1315,26 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       mfa1run=true
     end
   end
-  enterCredentials('after passcode')
+  
+  local xpform='//*[@name="signIn"]'
+  if html:xpath(xpform):attr("name") ~= '' then
+    leaveLoginLoop=false
+    print("enter username/password")
+    html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    html:xpath('//*[@name="password"]'):attr("value",secPassword)
+    html= connectShop(html:xpath(xpform):submit())
+  end
 
+  if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
+     print("skip phone dialog...")
+     enterOrderList()
+  end
+  
+  loginLoops=loginLoops+1
+  until(leaveLoginLoop or loginLoops>10)
+  
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
+    print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
       aName=html:xpath('//span[@class="abnav-accountfor"]'):text()
@@ -1304,9 +1344,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       aName="Unkown"
       -- print("can't get username, new layout?")
     else
-    -- print("name="..aName)
+    print("name="..aName)
     end
   else
+    print('login failed, clean cookies')
     LocalStorage.cookies=nil
     return LoginFailed
   end
