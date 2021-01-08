@@ -1094,6 +1094,18 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     webCacheState="login"..loginLoops
     print("login "..loginLoops..". try")
 
+   -- $x('//div[@id="auth-error-message-box"]')
+   local authError=html:xpath('//div[@id="auth-error-message-box"]'):text()
+   
+   if authError ~= '' then
+      MM.printStatus(authError)
+      print('login failed, clean cookies text')
+    LocalStorage.cookies=nil
+    return LoginFailed
+   end
+   
+
+
   -- authlink
   -- 
   -- $x('//form[@id="pollingForm"]')
