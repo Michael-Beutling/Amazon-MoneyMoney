@@ -1,6 +1,6 @@
 -- Amazon Plugin for https://moneymoney-app.com
 --
--- Copyright 2019-2020 Michael Beutling
+-- Copyright 2019-2021 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -41,7 +41,10 @@ local config={
   cleanOrdersCache=false,
   cleanFilterCache=false,
   cleanInvalidCache=false,
+  noRefresh=false,
   debug=false,
+  forceCaptcha=false,
+  limitOrders=250,
 }
 
 local const={
@@ -186,7 +189,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.13,
+WebBanking{version  = 1.14,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -1021,19 +1024,8 @@ function enterOrderList ()
   end
 end
 
-function enterCredentials(state)
-  webCacheState=state
-  local xpform='//*[@name="signIn"]'
-  if html:xpath(xpform):attr("name") ~= '' then
-    print("enter username/password")
-    html:xpath('//*[@name="email"]'):attr("value", secUsername)
-    html:xpath('//*[@name="password"]'):attr("value",secPassword)
-    html= connectShop(html:xpath(xpform):submit())
-    if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
-      print("skip phone dialog...")
-      enterOrderList()
-    end
-  end
+function endsWith(string,ending)
+  return string:sub(-#ending) == ending
 end
 
 function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
@@ -1046,7 +1038,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
           print("set config",k,"= true")
           config[k]=true
         else
-          print("set config",k,"= true")
+          print("set config",k,"= false")
           config[k]=false
         end
       end
@@ -1076,6 +1068,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       webCache=os.rename(webCacheFolder,webCacheFolder) and true or false
       if webCache then
         print("webcache on")
+        config.limitOrders=1e99
         local temp=webCacheFolder.."/cleanLocalStorage"
         local cleanLocalStorage=os.rename(temp,temp) and true or false
         if cleanLocalStorage then
@@ -1089,19 +1082,154 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     end
     html = connectShop("GET",baseurl)
     enterOrderList()
-
-    enterCredentials('1.login')
+    if config.forceCaptcha then
+      secPassword=credentials[2].."a"
+    end
   end
+
+  local leaveLoginLoop
+  local loginLoops=1
+  repeat
+    leaveLoginLoop=true
+    webCacheState="login"..loginLoops
+    print("login "..loginLoops..". try")
+
+   -- $x('//div[@id="auth-error-message-box"]')
+   local authError=html:xpath('//div[@id="auth-error-message-box"]'):text()
+
+   if authError ~= '' then
+      MM.printStatus(authError)
+      print('login failed, clean cookies text')
+    LocalStorage.cookies=nil
+    return LoginFailed
+   end
+
+
+
+  -- authlink
+  --
+  -- $x('//form[@id="pollingForm"]')
+  -- $x('//input[@name="transactionApprovalStatus"]')
+  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionPending">
+  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionCompleted">
+  --
+
+   local authLink=html:xpath('//form[@id="pollingForm"]')
+   if authLink:attr('id') ~='' then
+     print("auth link sended")
+     local waitUntil=os.time()+300
+     local poll
+     repeat
+        MM.printStatus("waiting for auth confirmation, "..math.floor(waitUntil-os.time()).." seconds left")
+        MM.sleep(3)
+        poll=connectShop(authLink:submit()):xpath('//input[@name="transactionApprovalStatus"]'):attr('value')
+        print("poll="..poll)
+     until( poll == 'TransactionCompleted' or waitUntil<os.time())
+     enterOrderList()
+   end
+
+
+
+   -- Account selector
+  -- https://www.amazon.de/ap/cvf/request.embed?arb=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30
+  -- arb= $x('//div[@data-arbtoken]')
+  -- $x('//div[@id="authportal-main-section"]')
+  --
+  local arbToken=html:xpath('//div[@data-arbtoken]'):attr('data-arbtoken')
+  if arbToken ~= '' then
+    print("account selector")
+    leaveLoginLoop=false
+    print('Account selector arbToken='..arbToken)
+    html=connectShop('GET','https://www.amazon.de/ap/cvf/request.embed?arb='..arbToken..'&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30')
+    leaveLoginLoop=false
+    -- work-a-round simple add new login
+    local signInLink=html:xpath('//a[@id="cvf-account-switcher-add-accounts-link"]'):attr('href')
+    print('signInLink='..signInLink)
+    if signInLink ~= '' then
+      html=connectShop('GET',signInLink)
+    end
+  end
+
+  -- auth select
+  --
+
+  local authSelect=html:xpath('//form[@id="auth-select-device-form"]')
+  if authSelect:text() ~= ''  then
+    print("auth selector")
+    leaveLoginLoop=false
+    -- name="otpDeviceContext"
+    local otpDeviceContext=''
+    local score=-1000
+    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
+      local k=element:attr('value')
+      local v=0
+      if endsWith(k,'TOTP') then
+        v=10
+      end
+      if endsWith(k,'VOICE') then
+        v=-10
+      end
+      if endsWith(k,'SMS') then
+        v=5
+      end
+      if score<v then
+        otpDeviceContext=k
+        score=v
+      end
+    end)
+    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
+      if element:attr('value') == otpDeviceContext then
+        element:attr('checked','checked')
+        print("select "..element:xpath('..'):text())
+      else
+        element:attr('checked','')
+      end
+    end)
+    html=connectShop(authSelect:submit())
+  end
+
+  -- new captcha?
+  -- ('//form[@action="/errors/validateCaptcha"]')
+  -- ('//form[@action="/errors/validateCaptcha"]//img')
+  -- ('//input[@id="captchacharacters"]')
+
+  -- local captcha=html:xpath('//form[@action="/errors/validateCaptcha"]')
+  -- if captcha:text() ~= "" then
+  --     leaveLoginLoop=false
+  --   -- untested...
+  --   print("untested ****************************")
+  --   if config.debug then print("login new captcha") end
+  --   if captcha1run then
+  --     local pic=connectShopRaw("GET",captcha:xpath('.//img'):attr('src'))
+  --     captcha1run=false
+  --     return {
+  --       title=captcha:xpath('.//label'):text(),
+  --       challenge=pic,
+  --       label=captcha:xpath('.//form//h4'):text()
+  --     }
+  --   else
+  --     captcha:xpath('.//input[@id="captchacharacters"]'):attr("value",credentials[1])
+  --     html=connectShop(captcha:submit())
+  --     captcha1run=true
+  --   end
+  -- end
+  --
 
   -- Captcha
   --
   local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
   --div id="image-captcha-section"
   if captcha ~= "" then
+    print("captcha")
+    leaveLoginLoop=false
     if config.debug then print("login captcha") end
     if captcha1run then
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
+      if config.forceCaptcha then
+         print('set correct password')
+         secPassword=credentials[2]
+      end
       return {
         title=html:xpath('//li'):text(),
         challenge=pic,
@@ -1111,16 +1239,15 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
       -- checkbox
       html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
-      enterCredentials('captcha')
       captcha1run=true
     end
   end
 
-  enterCredentials('after captcha')
-
   -- passcode
 
   if html:xpath('//form[@name="claimspicker"]'):text() ~= ''  then
+    print("passcode")
+    leaveLoginLoop=false
     local text=''
     local number=0
     local passcode1run=true
@@ -1171,6 +1298,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
 
   -- passcode part 2
   if html:xpath('//form[@action="verify"]'):text() ~= '' then
+    print("passcode part 2")
+    leaveLoginLoop=false
     if config.debug then print("passcode 2. part") end
     html:xpath('//*[@name="code"]'):attr("value",credentials[1])
     html= connectShop(html:xpath('//form[@action="verify"]'):submit())
@@ -1179,6 +1308,8 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   -- 2.FA
   local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
   if mfatext ~= "" then
+    print("multi factor auth")
+    leaveLoginLoop=false
     if config.debug then print("login mfa") end
     if mfa1run then
       -- print("mfa="..mfatext)
@@ -1196,9 +1327,26 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       mfa1run=true
     end
   end
-  enterCredentials('after passcode')
+
+  local xpform='//*[@name="signIn"]'
+  if html:xpath(xpform):attr("name") ~= '' then
+    leaveLoginLoop=false
+    print("enter username/password")
+    html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    html:xpath('//*[@name="password"]'):attr("value",secPassword)
+    html= connectShop(html:xpath(xpform):submit())
+  end
+
+  if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
+     print("skip phone dialog...")
+     enterOrderList()
+  end
+
+  loginLoops=loginLoops+1
+  until(leaveLoginLoop or loginLoops>10)
 
   if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
+    print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
       aName=html:xpath('//span[@class="abnav-accountfor"]'):text()
@@ -1208,9 +1356,10 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       aName="Unkown"
       -- print("can't get username, new layout?")
     else
-    -- print("name="..aName)
+    print("name="..aName)
     end
   else
+    print('login failed, clean cookies')
     LocalStorage.cookies=nil
     return LoginFailed
   end
@@ -1249,7 +1398,7 @@ function RefreshAccount (account, since)
           print("set config",k,"= true")
           config[k]=true
         else
-          print("set config",k,"= true")
+          print("set config",k,"= false")
           config[k]=false
         end
       end
@@ -1317,7 +1466,7 @@ function RefreshAccount (account, since)
 
   local transactions={}
 
-  if LocalStorage.loginCounter ~= LocalStorage.lastLoginCounter then
+  if LocalStorage.loginCounter ~= LocalStorage.lastLoginCounter and not config.noRefresh then
 
     html=connectShop("GET",baseurl)
 
@@ -1337,11 +1486,12 @@ function RefreshAccount (account, since)
     end
 
     local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    local numbersOfNewOrders=0
     orderFilterSelect:each(function(index,element)
       local orderFilterVal=element:attr('value')
       local foundOrders=true
       local foundNewOrders=false
-      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil then
+      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
         html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
@@ -1354,6 +1504,7 @@ function RefreshAccount (account, since)
             if LocalStorage.OrderCache[k]==nil then
               LocalStorage.OrderCache[k]=v
               foundNewOrders=true
+              numbersOfNewOrders=numbersOfNewOrders+1
             end
           end
           local nextPage=html:xpath('//li[@class="a-last"]/a[@href]')
@@ -1400,10 +1551,21 @@ function RefreshAccount (account, since)
       end
     end
 
+    if ordersTotal>config.limitOrders then
+      ordersTotal=config.limitOrders
+      table.insert(transactions,{
+        name="There are still more orders left...",
+        amount = 0,
+        bookingDate = now,
+        purpose = "Please reload...",
+        booked = false,
+      })
+    end
+
     -- get order details from order details page
 
     for orderCode,order in pairs(LocalStorage.OrderCache) do
-      if order.detailsDate < now then
+      if order.detailsDate < now and ordersCounter<config.limitOrders then
         ordersCounter=ordersCounter+1
         MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
         getOrderDetails(order)
@@ -1656,4 +1818,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFQCGGujwk30LSvvA/wjsHt9rT4fncwIUWD5bllIc3uz80JuJbxvnpaOg/3A=
+-- SIGNATURE: MC0CFQCGUL5Wlpp+rogeA1+TSRLu6eBHBgIUCXU4EqNNgjef87JzGejGDHgRMd8=
