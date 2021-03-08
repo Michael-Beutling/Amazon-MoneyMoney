@@ -189,7 +189,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.14,
+WebBanking{version  = 1.15,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -859,7 +859,7 @@ end
 
 function getOrdersFromSummary(html)
   local orders={}
-  html:xpath('//div[@id="ordersContainer"]//div[@class="a-box-group a-spacing-base order"]'):each(function(index,orderBox)
+  html:xpath('//div[@id="ordersContainer"]//div[contains(@class," order") and  .//div[contains(@class," order-info")]]'):each(function(index,orderBox)
     local orderInfo=orderBox:xpath('.//div[contains(@class,"order-info")]')
     local order={orderPositions={},orderSum=0,refund=0,detailsDate=2} -- #order
     if getOrderInfosFromSummaryHeader(orderInfo,order) then
@@ -1818,4 +1818,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFQCGUL5Wlpp+rogeA1+TSRLu6eBHBgIUCXU4EqNNgjef87JzGejGDHgRMd8=
+-- SIGNATURE: MCwCFFOnUF9VWO4JlwEBJ6XARRRIP19HAhQKOeRo5uY1BRcKctg7Lvf4/5cOuQ==
