@@ -45,6 +45,7 @@ local config={
   debug=false,
   forceCaptcha=false,
   limitOrders=250,
+  cookieLanguage='',
 }
 
 local const={
@@ -189,7 +190,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.15,
+WebBanking{version  = 1.16,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -345,6 +346,12 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
   end
 
   if not cached then
+    -- issue #28
+    if LocalStorage.patcher and LocalStorage.patcher.cookieLanguage then
+      connection:setCookie('lc-acbde='..LocalStorage.patcher.cookieLanguage..'; Domain='..const.domain..'; Expires=Tue, 01-Jan-2036 08:00:01 GMT; Path=/')
+    else 
+      connection:setCookie('lc-acbde=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
+    end 
     content, charset, mimeType, filename, headers = connection:request(method, url, postContent, postContentType, headers)
     if writeCache then
       local webFile=io.open(webCacheFolder..'/'..webCacheLastId..'.json',"wb")
@@ -374,6 +381,8 @@ function connectShopRaw(method, url, postContent, postContentType, headers)
     -- work around for deleted cookies, prevent captcha
     connection:setCookie('a-ogbcbff=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
     connection:setCookie('ap-fid=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/ap/; Secure')
+    -- issue #28 
+    connection:setCookie('lc-acbde=; Domain='..const.domain..'; Expires=Thu, 01-Jan-1970 00:00:10 GMT; Path=/')
 
     if config.debug then
       if LocalStorage.cookies~=connection:getCookies() then
