@@ -1091,9 +1091,6 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     end
     html = connectShop("GET",baseurl)
     enterOrderList()
-    if config.forceCaptcha then
-      secPassword=credentials[2].."a"
-    end
   end
   
   local leaveLoginLoop
@@ -1235,10 +1232,6 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     if captcha1run then
       local pic=connectShopRaw("GET",captcha)
       captcha1run=false
-      if config.forceCaptcha then
-         print('set correct password')
-         secPassword=credentials[2]
-      end
       return {
         title=html:xpath('//li'):text(),
         challenge=pic,
@@ -1248,6 +1241,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
       -- checkbox
       html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
+      html:xpath('//*[@name="password"]'):attr("value",secPassword)
       captcha1run=true
     end
   end
@@ -1341,7 +1335,13 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   if html:xpath(xpform):attr("name") ~= '' then
     leaveLoginLoop=false
     print("enter username/password")
-    html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    if config.forceCaptcha then
+      print("force captcha with wrong password")
+      html:xpath('//*[@name="email"]'):attr("value", secUsername.."a")
+      config.forceCaptcha=false
+    else
+      html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    end
     html:xpath('//*[@name="password"]'):attr("value",secPassword)
     html= connectShop(html:xpath(xpform):submit())
   end
