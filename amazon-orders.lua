@@ -1,6 +1,8 @@
 -- Amazon Plugin for https://moneymoney-app.com
 --
--- Copyright 2019-2021 Michael Beutling
+-- Plugin Homepage https://github.com/Michael-Beutling/Amazon-MoneyMoney
+--
+-- Copyright 2019-2022 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -868,7 +870,7 @@ end
 
 function getOrdersFromSummary(html)
   local orders={}
-  html:xpath('//div[@id="ordersContainer"]//div[contains(@class," order") and  .//div[contains(@class," order-info")]]'):each(function(index,orderBox)
+  html:xpath('//div[@id="ordersContainer" or contains(@class,"orders-content-container")]//div[contains(@class," order") and  .//div[contains(@class," order-info")]]'):each(function(index,orderBox)
     local orderInfo=orderBox:xpath('.//div[contains(@class,"order-info")]')
     local order={orderPositions={},orderSum=0,refund=0,detailsDate=2} -- #order
     if getOrderInfosFromSummaryHeader(orderInfo,order) then
@@ -1354,7 +1356,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
   loginLoops=loginLoops+1
   until(leaveLoginLoop or loginLoops>10)
   
-  if html:xpath('//*[@id="timePeriodForm"]'):attr('id') == 'timePeriodForm' then
+  if html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):length() > 0 then
     print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
@@ -1504,7 +1506,7 @@ function RefreshAccount (account, since)
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
         html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
-        html=connectShop(html:xpath('//*[@id="timePeriodForm"]'):submit())
+        html=connectShop(html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):submit())
 
         local foundEnd=false
         repeat
