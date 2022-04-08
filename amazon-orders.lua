@@ -621,17 +621,20 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
   end
 
   if order.bookingDate == invalidDate then
+    debugBuffer.print("getOrderInfosFromSummaryHeader invalidDate")
     order.orderCode=nil
   end
 
   if order.orderTotal == invalidPrice then
+    debugBuffer.print("getOrderInfosFromSummaryHeader invalidPrice")
     order.orderCode=nil
   end
 
-  order.detailsUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/order-details/")]'):attr('href')
+  order.detailsUrl=orderInfo:xpath('.//a[contains(@class,"a-link-normal") and contains(@href,"/order-details/")]'):attr('href')
   if order.detailsUrl == "" then
     order.digitalUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/digital/")]'):attr('href')
     if order.digitalUrl == "" then
+      debugBuffer.print("getOrderInfosFromSummaryHeader nodetails")
       order.orderCode=nil
     end
   end
@@ -888,6 +891,7 @@ function getOrdersFromSummary(html)
       end
       orders[order.orderCode]=order
     end
+    debugBuffer.flush()
     debugBuffer.context=''
   end) -- orderbox
   return orders
@@ -945,8 +949,8 @@ function getMessageList(since)
   local orderIds={}
   local html=connectShop("GET","/gp/message")
   local ajaxToken=html:xpath('//script[@type="a-state"]'):text()
-  ajaxToken=string.match(ajaxToken,'{"token":"([A-Z0-9]+)"}')
-  --print("ajaxToken",ajaxToken)
+  ajaxToken=string.match(ajaxToken,'{"token":"([A-Za-z0-9]+)"}')
+  print("ajaxToken",ajaxToken)
   if ajaxToken ~= "" then
     local page=1
     local messages={}
