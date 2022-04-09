@@ -412,7 +412,7 @@ function RegressionTest.makeRows(transactions)
   for _,transaction in pairs(transactions) do
     for k,v in pairs(transaction) do
       if k ~= 'name' then
-        local row=transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'"
+        local row=MM.base64(transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'")
         if rows[row]==nil then
           rows[row]=1
         else
@@ -441,14 +441,14 @@ function RegressionTest.compareTrees(now,master)
   debugBuffer.print("differences master")
   for k,v in pairs(master) do
     if v ~=0 then
-      debugBuffer.print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..MM.base64decode(k))
       differences=differences+1
     end
   end
   debugBuffer.print("differences now")
   for k,v in pairs(now) do
     if v ~=0 then
-      debugBuffer.print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..MM.base64decode(k))
       differences=differences+1
     end
   end
