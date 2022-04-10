@@ -47,6 +47,7 @@ local config={
   forceCaptcha=false,
   limitOrders=250,
   cookieLanguage='',
+  rescanOrder='',
 }
 
 local const={
@@ -1553,6 +1554,11 @@ function RefreshAccount (account, since)
       end
     end
     LocalStorage.newestMessage = newestMessage
+    
+    if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
+      LocalStorage.OrderCache[config.rescanOrder].detailsDate=1
+      print("rescan order="..config.rescanOrder)
+    end 
 
     -- count order details to get
 
@@ -1798,7 +1804,11 @@ function RefreshAccount (account, since)
   
   --print(balance)
   RegressionTest.run(transactions,account.accountNumber)
-
+  if config.debug then
+    if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
+      debugBuffer.print(LocalStorage.OrderCache[config.rescanOrder])
+    end 
+  end 
   debugBuffer.flush()
 
   if webCache then
