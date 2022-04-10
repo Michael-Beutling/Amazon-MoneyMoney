@@ -192,7 +192,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.17,
+WebBanking{version  = 1.18,
   url         = baseurl,
   services    = const.services,
   description = const.description}
