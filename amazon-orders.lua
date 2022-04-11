@@ -24,7 +24,6 @@ local mfa1run
 local aName
 local html
 local configDirty=false
-local cleanCache=false
 local webCache=false
 local webCacheFolder='webCache'
 local webCacheHit=false
@@ -48,6 +47,7 @@ local config={
   forceCaptcha=false,
   limitOrders=250,
   cookieLanguage='',
+  rescanOrder='',
 }
 
 local const={
@@ -192,7 +192,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.17,
+WebBanking{version  = 1.18,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -412,7 +412,7 @@ function RegressionTest.makeRows(transactions)
   for _,transaction in pairs(transactions) do
     for k,v in pairs(transaction) do
       if k ~= 'name' then
-        local row=transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'"
+        local row=MM.base64(transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'")
         if rows[row]==nil then
           rows[row]=1
         else
@@ -441,14 +441,14 @@ function RegressionTest.compareTrees(now,master)
   debugBuffer.print("differences master")
   for k,v in pairs(master) do
     if v ~=0 then
-      debugBuffer.print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..MM.base64decode(k))
       differences=differences+1
     end
   end
   debugBuffer.print("differences now")
   for k,v in pairs(now) do
     if v ~=0 then
-      debugBuffer.print("n="..v," value="..k)
+      debugBuffer.print("n="..v," value="..MM.base64decode(k))
       differences=differences+1
     end
   end
@@ -551,8 +551,8 @@ end
 
 function getQtyFromElement(element)
   local qty=1
-  if nodeExists(element,'.//span[@class="item-view-qty"]') then
-    qty=getQty(element:xpath('.//span[@class="item-view-qty"]'):text())
+  if nodeExists(element,'.//span[contains(@class,"item-view-qty")]') then
+    qty=getQty(element:xpath('.//span[contains(@class,"item-view-qty")]'):text())
   end
   return qty
 end
@@ -584,7 +584,7 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
 
   local headData={}
 
-  orderInfo:xpath('.//span[@class="a-color-secondary value"]'):each(function(index,element)
+  orderInfo:xpath('.//span[contains(@class,"a-color-secondary") and contains(@class,"value")]'):each(function(index,element)
     headData[index]=element:text()
   end)
 
@@ -615,23 +615,26 @@ function getOrderInfosFromSummaryHeader(orderInfo,order)
   end
 
   -- only business accounts
-  local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[@class="trigger-text"]'):text()
+  local endToEndReference=orderInfo:xpath('.//div[contains(@class,"placed-by")]//span[contains(@class,"trigger-text")]'):text()
   if endToEndReference ~= '' then
     order.endToEndReference=endToEndReference
   end
 
   if order.bookingDate == invalidDate then
+    debugBuffer.print("getOrderInfosFromSummaryHeader invalidDate")
     order.orderCode=nil
   end
 
   if order.orderTotal == invalidPrice then
+    debugBuffer.print("getOrderInfosFromSummaryHeader invalidPrice")
     order.orderCode=nil
   end
 
-  order.detailsUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/order-details/")]'):attr('href')
+  order.detailsUrl=orderInfo:xpath('.//a[contains(@class,"a-link-normal") and contains(@href,"/order-details/")]'):attr('href')
   if order.detailsUrl == "" then
-    order.digitalUrl=orderInfo:xpath('.//a[@class="a-link-normal" and contains(@href,"/digital/")]'):attr('href')
+    order.digitalUrl=orderInfo:xpath('.//a[contains(@class,"a-link-normal") and contains(@href,"/digital/")]'):attr('href')
     if order.digitalUrl == "" then
+      debugBuffer.print("getOrderInfosFromSummaryHeader nodetails")
       order.orderCode=nil
     end
   end
@@ -675,9 +678,9 @@ end
 function getTotalsFromDetails(orderDetails)
   local totals={} --#totals
 
-  local xPathPrefix=('//div[@id="od-subtotals"]//div[contains(@class,"a-span-last")]//')
-  totals.orderTotal=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[@class="a-color-base a-text-bold"]'))
-  totals.refund=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[@class="a-color-success a-text-bold"]'))
+  local xPathPrefix=('//div[contains(@id,"od-subtotals")]//div[contains(@class,"a-span-last")]//')
+  totals.orderTotal=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[contains(@class,"a-color-base") and contains(@class,"a-text-bold")]'))
+  totals.refund=getPrice(getLastElementText(orderDetails,xPathPrefix,'span[contains(@class,"a-color-success") and contains(@class,"a-text-bold")]'))
   if totals.refund ==invalidPrice then
     totals.refund=0
   end
@@ -694,17 +697,17 @@ function getArticleFromShipment(shipment,order,doInsert)
   doInsert=doInsert ~= false
 
   local refund=invalidPrice
-  local refundText=shipment:xpath('.//div[@class="actions"]'):text()
+  local refundText=shipment:xpath('.//div[contains(@class,"actions")]'):text()
   if refundText ~=""then
     refund=getPrice(refundText)
     --debugBuffer.print("action",order.orderCode,doInsert,refund)
   end
 
-  shipment:xpath('.//div[@class="a-fixed-left-grid-inner"]'):each(function(index,article)
+  shipment:xpath('.//div[contains(@class,"a-fixed-left-grid-inner")]'):each(function(index,article)
     local purpose
     local amount=invalidPrice
     local qty=getQtyFromElement(article)
-    article:xpath('.//div[@class="a-row"]'):each(function(index,row)
+    article:xpath('.//div[contains(@class,"a-row")]'):each(function(index,row)
       if purpose==nil then
         purpose=row:text()
       else
@@ -762,15 +765,15 @@ end
 -- @return
 
 function getReturnsFromDetails(orderDetails,order)
-  orderDetails:xpath('//div[@id="od-returns-panel"]//div[@class="a-box-inner"]'):each(function(index,returnedShipments)
+  orderDetails:xpath('//div[contains(@id,"od-returns-panel")]//div[contains(@class,"a-box-inner")]'):each(function(index,returnedShipments)
     -- debugBuffer.print(order.orderCode)
     local bookingDate=getDate(returnedShipments:xpath('.//div[@class="a-row a-spacing-base"]'):text())
 
     if bookingDate ~= invalidDate then
-      returnedShipments:xpath('.//div[@class="a-row a-spacing-mini"]'):each(function(index,returnedItems)
+      returnedShipments:xpath('.//div[contains(@class,"a-row")and contains(@class,"a-spacing-mini")]'):each(function(index,returnedItems)
         local purpose
         local amount=invalidPrice
-        returnedItems:xpath('.//div[@class="a-row"]'):each(function(index,row)
+        returnedItems:xpath('.//div[contains(@class,"a-row")]'):each(function(index,row)
           if purpose==nil then
             purpose=row:text()
           else
@@ -796,7 +799,7 @@ end
 -- @return
 --
 function getRefundTransActions(orderDetails,order)
-  orderDetails:xpath('.//div[@class="a-box a-last"]//div[@class="a-row a-color-success"]'):each(function(index,transaction)
+  orderDetails:xpath('.//div[contains(@class,"a-box") and contains(@class,"a-last")]//div[contains(@class,"a-row") and contains(@class,"a-color-success")]'):each(function(index,transaction)
     local bookingDate=getDate(transaction:text())
     local amount=getPrice(transaction:text())
     if bookingDate ~= invalidDate and amount ~= invalidPrice  then
@@ -839,7 +842,7 @@ function getOrderDetails(order)
   if order.detailsUrl ~= "" then
     --debugBuffer.print("getOrderDetails")
     local html=connectShopWithCheck("GET",order.detailsUrl)
-    local orderDetails=html:xpath('//div[@id="orderDetails"]')
+    local orderDetails=html:xpath('//div[contains(@id,"orderDetails")]')
     if orderDetails:text() ~="" then
       local totals=getTotalsFromDetails(html)
       --debugBuffer.print("total error",order.orderCode,"order",order.orderTotal , "totals",totals.orderTotal)
@@ -870,11 +873,11 @@ end
 
 function getOrdersFromSummary(html)
   local orders={}
-  html:xpath('//div[@id="ordersContainer" or contains(@class,"orders-content-container")]//div[contains(@class," order") and  .//div[contains(@class," order-info")]]'):each(function(index,orderBox)
+  html:xpath('//div[contains(@id,"ordersContainer") or contains(@class,"orders-content-container")]//div[contains(@class," order") and  .//div[contains(@class," order-info")]]'):each(function(index,orderBox)
     local orderInfo=orderBox:xpath('.//div[contains(@class,"order-info")]')
     local order={orderPositions={},orderSum=0,refund=0,detailsDate=2} -- #order
     if getOrderInfosFromSummaryHeader(orderInfo,order) then
-      orderBox:xpath('.//div[not(contains(@class,"order-info"))]//div[@class="a-box-inner"]'):each(function(index,shipment)
+      orderBox:xpath('.//div[not(contains(@class,"order-info"))]//div[contains(@class,"a-box-inner")]'):each(function(index,shipment)
         if isShipmentShorted(shipment) then
           order.detailsDate=0
           --debugBuffer.print("shorted",order.orderCode)
@@ -888,6 +891,7 @@ function getOrdersFromSummary(html)
       end
       orders[order.orderCode]=order
     end
+    debugBuffer.flush()
     debugBuffer.context=''
   end) -- orderbox
   return orders
@@ -944,9 +948,9 @@ function getMessageList(since)
   since=since*1000 -- in milliseconds
   local orderIds={}
   local html=connectShop("GET","/gp/message")
-  local ajaxToken=html:xpath('//script[@type="a-state"]'):text()
-  ajaxToken=string.match(ajaxToken,'{"token":"([A-Z0-9]+)"}')
-  --print("ajaxToken",ajaxToken)
+  local ajaxToken=html:xpath('//script[contains(@type,"a-state")]'):text()
+  ajaxToken=string.match(ajaxToken,'{"token":"([A-Za-z0-9]+)"}')
+  print("ajaxToken",ajaxToken)
   if ajaxToken ~= "" then
     local page=1
     local messages={}
@@ -1518,7 +1522,7 @@ function RefreshAccount (account, since)
               numbersOfNewOrders=numbersOfNewOrders+1
             end
           end
-          local nextPage=html:xpath('//li[@class="a-last"]/a[@href]')
+          local nextPage=html:xpath('//li[contains(@class,"a-last")]/a[@href]')
           if nextPage:text() ~= "" then
             html=connectShop(nextPage:click())
           else
@@ -1550,6 +1554,11 @@ function RefreshAccount (account, since)
       end
     end
     LocalStorage.newestMessage = newestMessage
+
+    if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
+      LocalStorage.OrderCache[config.rescanOrder].detailsDate=1
+      print("rescan order="..config.rescanOrder)
+    end
 
     -- count order details to get
 
@@ -1795,7 +1804,11 @@ function RefreshAccount (account, since)
 
   --print(balance)
   RegressionTest.run(transactions,account.accountNumber)
-
+  if config.debug then
+    if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
+      debugBuffer.print(LocalStorage.OrderCache[config.rescanOrder])
+    end
+  end
   debugBuffer.flush()
 
   if webCache then
@@ -1817,7 +1830,7 @@ end
 function EndSession ()
   -- Logout.
   if config.reallyLogout then
-    local logoutElement=html:xpath('//a[@id="nav-item-signout" or contains(@href,"sign-out")]')
+    local logoutElement=html:xpath('//a[contains(@id,"nav-item-signout") or contains(@href,"sign-out")]')
     if logoutElement ~= nil then
       print("Logout")
       if logoutElement:click() ~= nil then
@@ -1829,4 +1842,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFElGxHytkCKAbyHvfNFF1+zjKXSBAhUAgJT6/6hJRHV++r7chnpgqWZSBGU=
+-- SIGNATURE: MCwCFE3MwwSCNur37/Cxvzt+w0jHv3MbAhR591Qbc85KZO/F+UGw81+RyL9rvw==
