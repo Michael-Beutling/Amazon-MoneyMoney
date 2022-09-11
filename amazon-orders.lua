@@ -48,6 +48,7 @@ local config={
   limitOrders=250,
   cookieLanguage='',
   rescanOrder='',
+  blackListOrders='',
 }
 
 local const={
@@ -192,7 +193,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.18,
+WebBanking{version  = 1.19,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -1417,9 +1418,13 @@ function RefreshAccount (account, since)
           config[k]=false
         end
       end
+      if type(config[k]) == 'string' then
+        print("set config",k,v)
+        config[k]=v
+      end
       if type(const[k]) == 'string' then
         print("const k=",v)
-        const[k]=v      
+        const[k]=v
       end
       if k == 'resetCache' and v ~= LocalStorage.resetCache then
         LocalStorage.OrderCache={}
@@ -1437,6 +1442,11 @@ function RefreshAccount (account, since)
           }}
       end
     end
+  end
+
+  blackListOrders={}
+  for order in string.gmatch(config.blackListOrders, "[0-9-]+") do
+    blackListOrders[order]=true
   end
 
   local divisor=-100
@@ -1587,8 +1597,12 @@ function RefreshAccount (account, since)
     for orderCode,order in pairs(LocalStorage.OrderCache) do
       if order.detailsDate < now and ordersCounter<config.limitOrders then
         ordersCounter=ordersCounter+1
-        MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
-        getOrderDetails(order)
+        if not blackListOrders[orderCode] then
+          MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
+          getOrderDetails(order)
+        else
+          MM.printStatus(ordersCounter.."/"..ordersTotal,"Black listed order",orderCode)
+        end
       end
     end
 
@@ -1600,6 +1614,7 @@ function RefreshAccount (account, since)
   local balance=0
   local balancesByPeriod={}
   for orderCode,order in pairs(LocalStorage.OrderCache) do
+    if not blackListOrders[orderCode] then
 
     -- orderPositions,{purpose=purpose,amount=amount,qty=qty})
     if not mixed then
@@ -1714,6 +1729,7 @@ function RefreshAccount (account, since)
             end
           end
         end
+      end
       end
     end
 
