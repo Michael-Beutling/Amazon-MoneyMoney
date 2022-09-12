@@ -48,6 +48,7 @@ local config={
   limitOrders=250,
   cookieLanguage='',
   rescanOrder='',
+  blackListOrders='',
 }
 
 local const={
@@ -192,7 +193,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.18,
+WebBanking{version  = 1.19,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -230,11 +231,11 @@ end
 function debugBuffer.getStack(skip)
   local stack={}
   if skip== nil then
-  skip=3
+    skip=3
   end
   while debug.getinfo(skip) ~= nil do
-          table.insert(stack,debug.getinfo(skip).name)
-          skip=skip+1
+    table.insert(stack,debug.getinfo(skip).name)
+    skip=skip+1
   end
 
   return(table.concat(stack,"#"))
@@ -1106,193 +1107,175 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     webCacheState="login"..loginLoops
     print("login "..loginLoops..". try")
 
-   -- $x('//div[@id="auth-error-message-box"]')
-   local authError=html:xpath('//div[@id="auth-error-message-box"]'):text()
+    -- $x('//div[@id="auth-error-message-box"]')
+    local authError=html:xpath('//div[@id="auth-error-message-box"]'):text()
 
-   if authError ~= '' then
+    if authError ~= '' then
       MM.printStatus(authError)
       print('login failed, clean cookies text')
-    LocalStorage.cookies=nil
-    return LoginFailed
-   end
+      LocalStorage.cookies=nil
+      return LoginFailed
+    end
 
 
 
-  -- authlink
-  --
-  -- $x('//form[@id="pollingForm"]')
-  -- $x('//input[@name="transactionApprovalStatus"]')
-  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionPending">
-  -- <input type="hidden" name="transactionApprovalStatus" value="TransactionCompleted">
-  --
+    -- authlink
+    --
+    -- $x('//form[@id="pollingForm"]')
+    -- $x('//input[@name="transactionApprovalStatus"]')
+    -- <input type="hidden" name="transactionApprovalStatus" value="TransactionPending">
+    -- <input type="hidden" name="transactionApprovalStatus" value="TransactionCompleted">
+    --
 
-   local authLink=html:xpath('//form[@id="pollingForm"]')
-   if authLink:attr('id') ~='' then
-     print("auth link sended")
-     local waitUntil=os.time()+300
-     local poll
-     repeat
+    local authLink=html:xpath('//form[@id="pollingForm"]')
+    if authLink:attr('id') ~='' then
+      print("auth link sended")
+      local waitUntil=os.time()+300
+      local poll
+      repeat
         MM.printStatus("waiting for auth confirmation, "..math.floor(waitUntil-os.time()).." seconds left")
         MM.sleep(3)
         poll=connectShop(authLink:submit()):xpath('//input[@name="transactionApprovalStatus"]'):attr('value')
         print("poll="..poll)
-     until( poll == 'TransactionCompleted' or waitUntil<os.time())
-     enterOrderList()
-   end
-
-
-
-   -- Account selector
-  -- https://www.amazon.de/ap/cvf/request.embed?arb=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30
-  -- arb= $x('//div[@data-arbtoken]')
-  -- $x('//div[@id="authportal-main-section"]')
-  --
-  local arbToken=html:xpath('//div[@data-arbtoken]'):attr('data-arbtoken')
-  if arbToken ~= '' then
-    print("account selector")
-    leaveLoginLoop=false
-    print('Account selector arbToken='..arbToken)
-    html=connectShop('GET','https://www.amazon.de/ap/cvf/request.embed?arb='..arbToken..'&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30')
-    leaveLoginLoop=false
-    -- work-a-round simple add new login
-    local signInLink=html:xpath('//a[@id="cvf-account-switcher-add-accounts-link"]'):attr('href')
-    print('signInLink='..signInLink)
-    if signInLink ~= '' then
-      html=connectShop('GET',signInLink)
+      until( poll == 'TransactionCompleted' or waitUntil<os.time())
+      enterOrderList()
     end
-  end
 
-  -- auth select
-  --
 
-  local authSelect=html:xpath('//form[@id="auth-select-device-form"]')
-  if authSelect:text() ~= ''  then
-    print("auth selector")
-    leaveLoginLoop=false
-    -- name="otpDeviceContext"
-    local otpDeviceContext=''
-    local score=-1000
-    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
-      local k=element:attr('value')
-      local v=0
-      if endsWith(k,'TOTP') then
-        v=10
-      end
-      if endsWith(k,'VOICE') then
-        v=-10
-      end
-      if endsWith(k,'SMS') then
-        v=5
-      end
-      if score<v then
-        otpDeviceContext=k
-        score=v
-      end
-    end)
-    authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
-      if element:attr('value') == otpDeviceContext then
-        element:attr('checked','checked')
-        print("select "..element:xpath('..'):text())
-      else
-        element:attr('checked','')
-      end
-    end)
-    html=connectShop(authSelect:submit())
-  end
 
-  -- new captcha?
-  -- ('//form[@action="/errors/validateCaptcha"]')
-  -- ('//form[@action="/errors/validateCaptcha"]//img')
-  -- ('//input[@id="captchacharacters"]')
-
-  -- local captcha=html:xpath('//form[@action="/errors/validateCaptcha"]')
-  -- if captcha:text() ~= "" then
-  --     leaveLoginLoop=false
-  --   -- untested...
-  --   print("untested ****************************")
-  --   if config.debug then print("login new captcha") end
-  --   if captcha1run then
-  --     local pic=connectShopRaw("GET",captcha:xpath('.//img'):attr('src'))
-  --     captcha1run=false
-  --     return {
-  --       title=captcha:xpath('.//label'):text(),
-  --       challenge=pic,
-  --       label=captcha:xpath('.//form//h4'):text()
-  --     }
-  --   else
-  --     captcha:xpath('.//input[@id="captchacharacters"]'):attr("value",credentials[1])
-  --     html=connectShop(captcha:submit())
-  --     captcha1run=true
-  --   end
-  -- end
-  --
-
-  -- Captcha
-  --
-  local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
-  --div id="image-captcha-section"
-  if captcha ~= "" then
-    print("captcha")
-    leaveLoginLoop=false
-    if config.debug then print("login captcha") end
-    if captcha1run then
-      local pic=connectShopRaw("GET",captcha)
-      captcha1run=false
-      return {
-        title=html:xpath('//li'):text(),
-        challenge=pic,
-        label=html:xpath('//form//h4'):text()
-      }
-    else
-      html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
-      -- checkbox
-      html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
-      html:xpath('//*[@name="password"]'):attr("value",secPassword)
-      captcha1run=true
+    -- Account selector
+    -- https://www.amazon.de/ap/cvf/request.embed?arb=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30
+    -- arb= $x('//div[@data-arbtoken]')
+    -- $x('//div[@id="authportal-main-section"]')
+    --
+    local arbToken=html:xpath('//div[@data-arbtoken]'):attr('data-arbtoken')
+    if arbToken ~= '' then
+      print("account selector")
+      leaveLoginLoop=false
+      print('Account selector arbToken='..arbToken)
+      html=connectShop('GET','https://www.amazon.de/ap/cvf/request.embed?arb='..arbToken..'&CVFVersion=0.1.0.0-2020-12-30&AUIVersion=3.19.8-2020-12-30')
+      leaveLoginLoop=false
+      -- work-a-round simple add new login
+      local signInLink=html:xpath('//a[@id="cvf-account-switcher-add-accounts-link"]'):attr('href')
+      print('signInLink='..signInLink)
+      if signInLink ~= '' then
+        html=connectShop('GET',signInLink)
+      end
     end
-  end
 
-  -- passcode
+    -- auth select
+    --
 
-  if html:xpath('//form[@name="claimspicker"]'):text() ~= ''  then
-    print("passcode")
-    leaveLoginLoop=false
-    local text=''
-    local number=0
-    local passcode1run=true
-    if config.debug then print("passcode 1. part") end
-    html:xpath('//input[@type="radio"]'):each(function (index,element)
-      text=text..index..". "..element:xpath('..'):text().."\n"
-      number=index
-      if  tonumber(index) == tonumber(credentials[1]) then
-        element:attr('checked','checked')
-        if config.debug then print("select",element:xpath('..'):text()) end
-        passcode1run=false
-      else
-        element:attr('checked','')
-      end
-      --print(index,element:xpath('..'):text(),element:attr('checked'))
-    end)
-    if number == 0 then
-      -- no selectable options
-      html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
-      if html:xpath('//form[@action="verify"]'):text() ~= '' then
+    local authSelect=html:xpath('//form[@id="auth-select-device-form"]')
+    if authSelect:text() ~= ''  then
+      print("auth selector")
+      leaveLoginLoop=false
+      -- name="otpDeviceContext"
+      local otpDeviceContext=''
+      local score=-1000
+      authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
+        local k=element:attr('value')
+        local v=0
+        if endsWith(k,'TOTP') then
+          v=10
+        end
+        if endsWith(k,'VOICE') then
+          v=-10
+        end
+        if endsWith(k,'SMS') then
+          v=5
+        end
+        if score<v then
+          otpDeviceContext=k
+          score=v
+        end
+      end)
+      authSelect:xpath('.//input[@type="radio"]'):each(function (index,element)
+        if element:attr('value') == otpDeviceContext then
+          element:attr('checked','checked')
+          print("select "..element:xpath('..'):text())
+        else
+          element:attr('checked','')
+        end
+      end)
+      html=connectShop(authSelect:submit())
+    end
+
+    -- new captcha?
+    -- ('//form[@action="/errors/validateCaptcha"]')
+    -- ('//form[@action="/errors/validateCaptcha"]//img')
+    -- ('//input[@id="captchacharacters"]')
+
+    -- local captcha=html:xpath('//form[@action="/errors/validateCaptcha"]')
+    -- if captcha:text() ~= "" then
+    --     leaveLoginLoop=false
+    --   -- untested...
+    --   print("untested ****************************")
+    --   if config.debug then print("login new captcha") end
+    --   if captcha1run then
+    --     local pic=connectShopRaw("GET",captcha:xpath('.//img'):attr('src'))
+    --     captcha1run=false
+    --     return {
+    --       title=captcha:xpath('.//label'):text(),
+    --       challenge=pic,
+    --       label=captcha:xpath('.//form//h4'):text()
+    --     }
+    --   else
+    --     captcha:xpath('.//input[@id="captchacharacters"]'):attr("value",credentials[1])
+    --     html=connectShop(captcha:submit())
+    --     captcha1run=true
+    --   end
+    -- end
+    --
+
+    -- Captcha
+    --
+    local captcha=html:xpath('//img[@id="auth-captcha-image"]'):attr('src')
+    --div id="image-captcha-section"
+    if captcha ~= "" then
+      print("captcha")
+      leaveLoginLoop=false
+      if config.debug then print("login captcha") end
+      if captcha1run then
+        local pic=connectShopRaw("GET",captcha)
+        captcha1run=false
         return {
-          title=html:xpath('//form[@action="verify"]//div[1]//div[1]'):text(),
-          challenge=html:xpath('//form[@action="verify"]//div[1]//div[2]'):text(),
-          label='Code'
-        }
-      end
-    else
-      if passcode1run then
-        passcode1run=false
-        -- ask for passcode methode, feature request select field when return value a table?
-        return {
-          title=html:xpath('//form[@action="claimspicker"]//div[1]'):text(),
-          challenge=text,
-          label='Please select 1-'..number
+          title=html:xpath('//li'):text(),
+          challenge=pic,
+          label=html:xpath('//form//h4'):text()
         }
       else
+        html:xpath('//*[@name="guess"]'):attr("value",credentials[1])
+        -- checkbox
+        html:xpath('//*[@name="rememberMe"]'):attr('checked','checked')
+        html:xpath('//*[@name="password"]'):attr("value",secPassword)
+        captcha1run=true
+      end
+    end
+
+    -- passcode
+
+    if html:xpath('//form[@name="claimspicker"]'):text() ~= ''  then
+      print("passcode")
+      leaveLoginLoop=false
+      local text=''
+      local number=0
+      local passcode1run=true
+      if config.debug then print("passcode 1. part") end
+      html:xpath('//input[@type="radio"]'):each(function (index,element)
+        text=text..index..". "..element:xpath('..'):text().."\n"
+        number=index
+        if  tonumber(index) == tonumber(credentials[1]) then
+          element:attr('checked','checked')
+          if config.debug then print("select",element:xpath('..'):text()) end
+          passcode1run=false
+        else
+          element:attr('checked','')
+        end
+        --print(index,element:xpath('..'):text(),element:attr('checked'))
+      end)
+      if number == 0 then
+        -- no selectable options
         html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
         if html:xpath('//form[@action="verify"]'):text() ~= '' then
           return {
@@ -1301,63 +1284,81 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
             label='Code'
           }
         end
+      else
+        if passcode1run then
+          passcode1run=false
+          -- ask for passcode methode, feature request select field when return value a table?
+          return {
+            title=html:xpath('//form[@action="claimspicker"]//div[1]'):text(),
+            challenge=text,
+            label='Please select 1-'..number
+          }
+        else
+          html= connectShop(html:xpath('//form[@name="claimspicker"]'):submit())
+          if html:xpath('//form[@action="verify"]'):text() ~= '' then
+            return {
+              title=html:xpath('//form[@action="verify"]//div[1]//div[1]'):text(),
+              challenge=html:xpath('//form[@action="verify"]//div[1]//div[2]'):text(),
+              label='Code'
+            }
+          end
+        end
       end
     end
-  end
 
-  -- passcode part 2
-  if html:xpath('//form[@action="verify"]'):text() ~= '' then
-    print("passcode part 2")
-    leaveLoginLoop=false
-    if config.debug then print("passcode 2. part") end
-    html:xpath('//*[@name="code"]'):attr("value",credentials[1])
-    html= connectShop(html:xpath('//form[@action="verify"]'):submit())
-  end
-
-  -- 2.FA
-  local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
-  if mfatext ~= "" then
-    print("multi factor auth")
-    leaveLoginLoop=false
-    if config.debug then print("login mfa") end
-    if mfa1run then
-      -- print("mfa="..mfatext)
-      mfa1run=false
-      return {
-        title='Two-factor authentication',
-        challenge=mfatext,
-        label='Code'
-      }
-    else
-      html:xpath('//*[@name="otpCode"]'):attr("value",credentials[1])
-      -- checkbox
-      html:xpath('//*[@name="rememberDevice"]'):attr('checked','checked')
-      html= connectShop(html:xpath('//*[@id="auth-mfa-form"]'):submit())
-      mfa1run=true
+    -- passcode part 2
+    if html:xpath('//form[@action="verify"]'):text() ~= '' then
+      print("passcode part 2")
+      leaveLoginLoop=false
+      if config.debug then print("passcode 2. part") end
+      html:xpath('//*[@name="code"]'):attr("value",credentials[1])
+      html= connectShop(html:xpath('//form[@action="verify"]'):submit())
     end
-  end
 
-  local xpform='//*[@name="signIn"]'
-  if html:xpath(xpform):attr("name") ~= '' then
-    leaveLoginLoop=false
-    print("enter username/password")
-    if config.forceCaptcha then
-      print("force captcha with wrong password")
-      html:xpath('//*[@name="email"]'):attr("value", secUsername.."a")
-      config.forceCaptcha=false
-    else
-      html:xpath('//*[@name="email"]'):attr("value", secUsername)
+    -- 2.FA
+    local mfatext=html:xpath('//form[@id="auth-mfa-form"]//p'):text()
+    if mfatext ~= "" then
+      print("multi factor auth")
+      leaveLoginLoop=false
+      if config.debug then print("login mfa") end
+      if mfa1run then
+        -- print("mfa="..mfatext)
+        mfa1run=false
+        return {
+          title='Two-factor authentication',
+          challenge=mfatext,
+          label='Code'
+        }
+      else
+        html:xpath('//*[@name="otpCode"]'):attr("value",credentials[1])
+        -- checkbox
+        html:xpath('//*[@name="rememberDevice"]'):attr('checked','checked')
+        html= connectShop(html:xpath('//*[@id="auth-mfa-form"]'):submit())
+        mfa1run=true
+      end
     end
-    html:xpath('//*[@name="password"]'):attr("value",secPassword)
-    html= connectShop(html:xpath(xpform):submit())
-  end
 
-  if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
-     print("skip phone dialog...")
-     enterOrderList()
-  end
+    local xpform='//*[@name="signIn"]'
+    if html:xpath(xpform):attr("name") ~= '' then
+      leaveLoginLoop=false
+      print("enter username/password")
+      if config.forceCaptcha then
+        print("force captcha with wrong password")
+        html:xpath('//*[@name="email"]'):attr("value", secUsername.."a")
+        config.forceCaptcha=false
+      else
+        html:xpath('//*[@name="email"]'):attr("value", secUsername)
+      end
+      html:xpath('//*[@name="password"]'):attr("value",secPassword)
+      html= connectShop(html:xpath(xpform):submit())
+    end
 
-  loginLoops=loginLoops+1
+    if html:xpath('//a[@id="ap-account-fixup-phone-skip-link"]'):attr('id') ~= '' then
+      print("skip phone dialog...")
+      enterOrderList()
+    end
+
+    loginLoops=loginLoops+1
   until(leaveLoginLoop or loginLoops>10)
 
   if html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):length() > 0 then
@@ -1371,7 +1372,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
       aName="Unkown"
       -- print("can't get username, new layout?")
     else
-    print("name="..aName)
+      print("name="..aName)
     end
   else
     print('login failed, clean cookies')
@@ -1417,6 +1418,10 @@ function RefreshAccount (account, since)
           config[k]=false
         end
       end
+      if type(config[k]) == 'string' then
+        print("set config",k,v)
+        config[k]=v
+      end
       if type(const[k]) == 'string' then
         print("const k=",v)
         const[k]=v
@@ -1428,15 +1433,20 @@ function RefreshAccount (account, since)
         LocalStorage.resetCache=v
         return {balance=0, transactions={[1]=
           {
-              name="Cache reset, please reload!",
-              amount = 0,
-              bookingDate = now,
-              purpose = "... and drink a coffee :)",
-              booked = false,
-            }
-          }}
+            name="Cache reset, please reload!",
+            amount = 0,
+            bookingDate = now,
+            purpose = "... and drink a coffee :)",
+            booked = false,
+          }
+        }}
       end
     end
+  end
+
+  blackListOrders={}
+  for order in string.gmatch(config.blackListOrders, "[0-9-]+") do
+    blackListOrders[order]=true
   end
 
   local divisor=-100
@@ -1587,8 +1597,12 @@ function RefreshAccount (account, since)
     for orderCode,order in pairs(LocalStorage.OrderCache) do
       if order.detailsDate < now and ordersCounter<config.limitOrders then
         ordersCounter=ordersCounter+1
-        MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
-        getOrderDetails(order)
+        if not blackListOrders[orderCode] then
+          MM.printStatus(ordersCounter.."/"..ordersTotal,"Get details for order",orderCode)
+          getOrderDetails(order)
+        else
+          MM.printStatus(ordersCounter.."/"..ordersTotal,"Black listed order",orderCode)
+        end
       end
     end
 
@@ -1600,117 +1614,119 @@ function RefreshAccount (account, since)
   local balance=0
   local balancesByPeriod={}
   for orderCode,order in pairs(LocalStorage.OrderCache) do
+    if not blackListOrders[orderCode] then
 
-    -- orderPositions,{purpose=purpose,amount=amount,qty=qty})
-    if not mixed then
-      balance=balance+order.orderTotal
-    end
-    if order.since == nil then
-      order.since=now
-    end
-
-    local report=order.since >= since
-
-    if periodly then
-      local period=os.date(periodFmt,order.bookingDate)
-      if balancesByPeriod[period] == nil then
-        balancesByPeriod[period] = {report=true,balance=order.orderTotal}
-      else
-        balancesByPeriod[period].balance=balancesByPeriod[period].balance+order.orderTotal
+      -- orderPositions,{purpose=purpose,amount=amount,qty=qty})
+      if not mixed then
+        balance=balance+order.orderTotal
       end
-      if not report then
-        balancesByPeriod[period].report=false
-      end
-    end
-
-
-    if report then
-      for index,position in pairs(order.orderPositions) do
-        table.insert(transactions,{
-          name=orderCode,
-          amount = position.amount/divisor*position.qty,
-          bookingDate = order.bookingDate+1,
-          purpose = MM.toEncoding(const.fixEncoding,position.purpose),
-          endToEndReference = order.endToEndReference,
-          accountNumber = order.accountNumber,
-          bookingText=order.bookingText,
-        })
+      if order.since == nil then
+        order.since=now
       end
 
-      if order.orderSum ~= order.orderTotal then
-        table.insert(transactions,{
-          name=orderCode,
-          amount = (order.orderTotal-order.orderSum)/divisor,
-          bookingDate = order.bookingDate,
-          purpose = const.differenceText,
-          endToEndReference = order.endToEndReference,
-          accountNumber = order.accountNumber,
-          bookingText=order.bookingText,
-        })
+      local report=order.since >= since
+
+      if periodly then
+        local period=os.date(periodFmt,order.bookingDate)
+        if balancesByPeriod[period] == nil then
+          balancesByPeriod[period] = {report=true,balance=order.orderTotal}
+        else
+          balancesByPeriod[period].balance=balancesByPeriod[period].balance+order.orderTotal
+        end
+        if not report then
+          balancesByPeriod[period].report=false
+        end
       end
 
-      if mixed and order.orderTotal ~= 0 and not periodly then
-        if order.since >= since then
+
+      if report then
+        for index,position in pairs(order.orderPositions) do
           table.insert(transactions,{
             name=orderCode,
-            amount = order.orderTotal/divisor*-1,
-            bookingDate = order.bookingDate,
-            purpose = const.contra..orderCode,
+            amount = position.amount/divisor*position.qty,
+            bookingDate = order.bookingDate+1,
+            purpose = MM.toEncoding(const.fixEncoding,position.purpose),
             endToEndReference = order.endToEndReference,
             accountNumber = order.accountNumber,
             bookingText=order.bookingText,
           })
         end
-      end
-    end
 
-    -- makeBranch(order,{'refundTransactions',bookingDate,amount})
-    if order.refundTransactions ~= nil then
-      for bookingDate,v in pairs(order.refundTransactions) do
-
-        local period=os.date(periodFmt,bookingDate)
-        if balancesByPeriod[period] == nil then
-          balancesByPeriod[period] = {report=true,balance=0}
+        if order.orderSum ~= order.orderTotal then
+          table.insert(transactions,{
+            name=orderCode,
+            amount = (order.orderTotal-order.orderSum)/divisor,
+            bookingDate = order.bookingDate,
+            purpose = const.differenceText,
+            endToEndReference = order.endToEndReference,
+            accountNumber = order.accountNumber,
+            bookingText=order.bookingText,
+          })
         end
-        for amount,v in pairs(v) do
 
-          if not mixed then
-            balance=balance-amount
-          end
-
-          if v.since== nil then
-            v.since=now
-          end
-
-          local report=v.since >= since
-
-          if periodly then
-            balancesByPeriod[period].balance=balancesByPeriod[period].balance-amount
-            if not report then
-              balancesByPeriod[period].report=false
-            end
-          end
-
-          if v.since >= since then
+        if mixed and order.orderTotal ~= 0 and not periodly then
+          if order.since >= since then
             table.insert(transactions,{
               name=orderCode,
-              amount = amount/divisor*-1,
-              bookingDate = bookingDate,
-              purpose = const.refundTransaction..orderCode,
+              amount = order.orderTotal/divisor*-1,
+              bookingDate = order.bookingDate,
+              purpose = const.contra..orderCode,
               endToEndReference = order.endToEndReference,
               accountNumber = order.accountNumber,
               bookingText=order.bookingText,
             })
-            if mixed and not periodly then
+          end
+        end
+      end
+
+      -- makeBranch(order,{'refundTransactions',bookingDate,amount})
+      if order.refundTransactions ~= nil then
+        for bookingDate,v in pairs(order.refundTransactions) do
+
+          local period=os.date(periodFmt,bookingDate)
+          if balancesByPeriod[period] == nil then
+            balancesByPeriod[period] = {report=true,balance=0}
+          end
+          for amount,v in pairs(v) do
+
+            if not mixed then
+              balance=balance-amount
+            end
+
+            if v.since== nil then
+              v.since=now
+            end
+
+            local report=v.since >= since
+
+            if periodly then
+              balancesByPeriod[period].balance=balancesByPeriod[period].balance-amount
+              if not report then
+                balancesByPeriod[period].report=false
+              end
+            end
+
+            if v.since >= since then
               table.insert(transactions,{
                 name=orderCode,
-                amount = amount/divisor,
+                amount = amount/divisor*-1,
                 bookingDate = bookingDate,
-                purpose = const.refundTransactionContra..orderCode,
+                purpose = const.refundTransaction..orderCode,
                 endToEndReference = order.endToEndReference,
                 accountNumber = order.accountNumber,
                 bookingText=order.bookingText,
               })
+              if mixed and not periodly then
+                table.insert(transactions,{
+                  name=orderCode,
+                  amount = amount/divisor,
+                  bookingDate = bookingDate,
+                  purpose = const.refundTransactionContra..orderCode,
+                  endToEndReference = order.endToEndReference,
+                  accountNumber = order.accountNumber,
+                  bookingText=order.bookingText,
+                })
+              end
             end
           end
         end
@@ -1763,8 +1779,8 @@ function RefreshAccount (account, since)
     for k,v in pairs(balancesByPeriod) do
       if lastPeriod<k then
         lastPeriod=k
-       end
-       -- debugBuffer.print(k)
+      end
+      -- debugBuffer.print(k)
     end
 
     -- debugBuffer.print("lastPeriod=",lastPeriod)
@@ -1786,16 +1802,16 @@ function RefreshAccount (account, since)
           end
         end
         for _,v in  ipairs(LocalStorage.balancesByPeriod[k]) do
-              table.insert(transactions,{
-                name=k,
-                amount = v/divisor*-1,
-                bookingDate = getLastDayOfPeriod(k),
-                purpose = periodContra,
-                booked= k~=lastPeriod,
-              })
-              if k == lastPeriod then
-                balance=v
-              end
+          table.insert(transactions,{
+            name=k,
+            amount = v/divisor*-1,
+            bookingDate = getLastDayOfPeriod(k),
+            purpose = periodContra,
+            booked= k~=lastPeriod,
+          })
+          if k == lastPeriod then
+            balance=v
+          end
           -- debugBuffer.print(k,v,getLastDayOfPeriod(k))
         end
       end
@@ -1842,4 +1858,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MCwCFE3MwwSCNur37/Cxvzt+w0jHv3MbAhR591Qbc85KZO/F+UGw81+RyL9rvw==
+-- SIGNATURE: MCwCFC0cAK33oW4L928DkYOukG9dTBLbAhRwiJFT91/+4FykG1FmEanlmk15ew==
