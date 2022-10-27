@@ -193,7 +193,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.19,
+WebBanking{version  = 1.20,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -913,6 +913,13 @@ function getMessageListURL(ajaxToken,page,pageToken)
     stringDebug='',
     isDebug=''
   }
+  if ajaxToken == nil then
+    -- https://www.amazon.de/gp/msg/cntr/message-list/?messageType=all&startDateTime=NaN&endDateTime=NaN&pageSize=10&pageNum=1&sourcePage=inbox&isMobile=0&token=stateData.token&stringDebug=&isDebug=
+    url='/gp/msg/cntr/message-list/?'
+    fields.startDateTime='NaN'
+    fields.endDateTime='NaN'
+    fields.token='stateData.token'
+  end
   local t={}
   for k,v in pairs(fields) do
     if v ~= nil then
@@ -923,7 +930,8 @@ function getMessageListURL(ajaxToken,page,pageToken)
 end
 
 function getMessageURL(ajaxToken,messageId,threadId,messageDateTime)
-  local url='/gp/message/ajax/message-content.html?'
+--https://www.amazon.de/gp/msg/cntr/message-content/?messageId=urn%3Artn%3Amsg%&threadId=&messageType=all&sourcePage=inbox&messageDateTime=16667&isMobile=0&token=stateData.token&stringDebug=&isDebug=
+  local url
   local fields={
     messageId=messageId,
     threadId=threadId,
@@ -935,6 +943,12 @@ function getMessageURL(ajaxToken,messageId,threadId,messageDateTime)
     stringDebug='',
     isDebug=''
   }
+  if ajaxToken == nil then
+    url='/gp/msg/cntr/message-content/?'
+    fields.token='stateData.token'
+  else
+    url='/gp/message/ajax/message-content.html?'
+  end
   local t={}
   for k,v in pairs(fields) do
     if v ~= nil then
@@ -958,31 +972,51 @@ function getMessageList(since)
     local nextPageToken
     repeat
       MM.printStatus("Get page",page,"from Amazon message center.")
-      local json=connectShopJson("GET",getMessageListURL(ajaxToken,page,nextPageToken))
+      local html
       local noNextPage=true
-      if json.html ~= nil then
-        local newMessages=false
-        local html=HTML("<html><body>"..json['html'].."</html></body>")
-        html:xpath('//td'):each(function(index,td)
-          local message={}
-          for _,k in pairs({'messageSentTime','messageId','threadId'}) do
-            message[k]=td:attr(k:lower())
-          end
-          if tonumber(message.messageSentTime) > since then
-            messages[message.messageId]=message
-            newMessages=true
-          end
-          --debugBuffer.print(message)
-        end)
-        json.html = nil
         --debugBuffer.print(page,json)
-        if json.nextPageToken~= nil and newMessages then
-          noNextPage=false
-          page=page+1
+      if ajaxToken ~= nil then
+        local json=connectShopJson("GET",getMessageListURL(ajaxToken,page,nextPageToken))
+        if json.html ~= nil then
+          html=HTML("<html><body>"..json['html'].."</html></body>")
+          json.html = nil
+        end
+        if json.nextPageToken~= nil then
           nextPageToken=json.nextPageToken
+          noNextPage=true
+        end
+      else
+        html=connectShop("GET",getMessageListURL(ajaxToken,page,nextPageToken))
+        
+        nextPageToken=html:xpath("//div[@id='nextPageTokenValue']"):attr('data-val')
+        if nextPageToken ~= '' then
+          noNextPage=false
         end
       end
       --debugBuffer.flush()
+      
+      local newMessages=false
+      html:xpath('//td'):each(function(index,td)
+        local message={}
+        for _,k in pairs({'messageSentTime','message-sent-time-in-ms','messageId','message-id','threadId','thread-id'}) do
+          message[k]=td:attr(k:lower())
+        end
+        if message['message-sent-time-in-ms'] ~= nil then
+          message.messageSentTime=message['message-sent-time-in-ms']
+          message.threadId=message['threadId']
+          message.messageId=message['message-id']
+        end
+        if tonumber(message.messageSentTime) > since then
+          messages[message.messageId]=message
+          newMessages=true
+        end
+        debugBuffer.print(message)
+      end)
+      --debugBuffer.print(page,json)
+      if not newMessages then
+        noNextPage=true
+      end
+      page=page+1
     until noNextPage
     local numAll=0
     local num=0
@@ -992,12 +1026,19 @@ function getMessageList(since)
     for _,v in pairs(messages) do
       num=num+1
       MM.printStatus("Get Amazon message",num,"of",numAll)
-      local json=connectShopJson("GET",getMessageURL(ajaxToken,v.messageId,v.threadId,v.messageSentTime))
-      if json.html ~= nil then
-        local html=HTML("<html><body>"..json['html'].."</html></body>")
-        for orderId in html:html():gmatch(const.regexOrderCodeNew) do
-          orderIds[orderId]=tonumber(v.messageSentTime)/1000 -- in milliseconds
+      local html
+      if ajaxToken ~= nil then
+        local json=connectShopJson("GET",getMessageURL(ajaxToken,v.messageId,v.threadId,v.messageSentTime))
+        if json.html ~= nil then
+          html=HTML("<html><body>"..json['html'].."</html></body>")
+        else
+          html=''
         end
+      else
+        html=connectShop("GET",getMessageURL(ajaxToken,v.messageId,v.threadId,v.messageSentTime))
+      end
+      for orderId in html:html():gmatch(const.regexOrderCodeNew) do
+        orderIds[orderId]=tonumber(v.messageSentTime)/1000 -- in milliseconds
       end
     end
   end
