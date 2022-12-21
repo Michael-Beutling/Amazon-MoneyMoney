@@ -537,7 +537,6 @@ function getPrice(text)
     amountHigh,amountLow=string.match(text:gsub("%.",""),const.regexPriceOld)
   end
   --debugBuffer.print(text,amountHigh,amountLow)
-  print(text,amountHigh,amountLow)
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
   end
