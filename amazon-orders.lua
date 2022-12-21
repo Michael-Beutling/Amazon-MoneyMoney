@@ -53,7 +53,8 @@ local config={
 
 local const={
   regexOrderCodeNew="([D%d]%d%d%-%d%d%d%d%d%d%d%-%d%d%d%d%d%d%d)",
-  regexPrice="EUR%s+(%d+),(%d%d)",
+  regexPriceOld="EUR%s+(%d+),(%d%d)",
+  regexPriceNew="€(%d+),(%d%d)",
   str2date = {
     Januar=1,
     January=1,
@@ -193,7 +194,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.20,
+WebBanking{version  = 1.21,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -531,8 +532,12 @@ function getPrice(text)
   if type(text)~='string' then
     return invalidPrice
   end
-  local amountHigh,amountLow=string.match(text,const.regexPrice)
+  local amountHigh,amountLow=string.match(text:gsub("%.",""),const.regexPriceNew)
+  if amountHigh == nil or amountLow == nil then
+    amountHigh,amountLow=string.match(text:gsub("%.",""),const.regexPriceOld)
+  end
   --debugBuffer.print(text,amountHigh,amountLow)
+  print(text,amountHigh,amountLow)
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
   end
