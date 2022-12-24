@@ -1490,7 +1490,8 @@ function RefreshAccount (account, since)
   end
 
   blackListOrders={}
-  for order in string.gmatch(config.blackListOrders, "[0-9-]+") do
+  for order in string.gmatch(config.blackListOrders, "[D0-9-]+") do
+    print("blacklist order=",order)
     blackListOrders[order]=true
   end
 
