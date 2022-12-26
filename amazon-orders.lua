@@ -31,7 +31,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=9
+local cacheVersion=10
 local debugBuffer={context=''}
 local webCacheLastId=nil
 
