@@ -31,7 +31,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=9
+local cacheVersion=10
 local debugBuffer={context=''}
 local webCacheLastId=nil
 
@@ -53,7 +53,8 @@ local config={
 
 local const={
   regexOrderCodeNew="([D%d]%d%d%-%d%d%d%d%d%d%d%-%d%d%d%d%d%d%d)",
-  regexPrice="EUR%s+(%d+),(%d%d)",
+  regexPriceOld="EUR%s+(%d+),(%d%d)",
+  regexPriceNew="€(%d+),(%d%d)",
   str2date = {
     Januar=1,
     January=1,
@@ -193,7 +194,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.20,
+WebBanking{version  = 1.21,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -531,7 +532,10 @@ function getPrice(text)
   if type(text)~='string' then
     return invalidPrice
   end
-  local amountHigh,amountLow=string.match(text,const.regexPrice)
+  local amountHigh,amountLow=string.match(text:gsub("%.",""),const.regexPriceNew)
+  if amountHigh == nil or amountLow == nil then
+    amountHigh,amountLow=string.match(text:gsub("%.",""),const.regexPriceOld)
+  end
   --debugBuffer.print(text,amountHigh,amountLow)
   if amountHigh == nil or amountLow == nil then
     return invalidPrice
@@ -1486,7 +1490,8 @@ function RefreshAccount (account, since)
   end
 
   blackListOrders={}
-  for order in string.gmatch(config.blackListOrders, "[0-9-]+") do
+  for order in string.gmatch(config.blackListOrders, "[D0-9-]+") do
+    print("blacklist order=",order)
     blackListOrders[order]=true
   end
 
@@ -1899,4 +1904,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC0CFQCgpAS/xKCAj8BehCzS84QzZtwOBwIUKzx14wVJHL8cs6NhhPgalrEhnls=
+-- SIGNATURE: MC4CFQCWaBbxVgsiwyb3GfcH6v4u7UfJMAIVAIjE1bZcSderEyYQ5QLjFa+sHUh9
