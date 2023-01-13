@@ -31,7 +31,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=10
+local cacheVersion=11
 local debugBuffer={context=''}
 local webCacheLastId=nil
 
@@ -194,7 +194,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.21,
+WebBanking{version  = 1.22,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -409,52 +409,51 @@ end
 
 local RegressionTest={}
 
-function RegressionTest.makeRows(transactions)
-  local rows={}
-  for _,transaction in pairs(transactions) do
+
+function RegressionTest.getKey(transaction)
+    local sortedKeys={}
     for k,v in pairs(transaction) do
-      if k ~= 'name' then
-        local row=MM.base64(transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'")
-        if rows[row]==nil then
-          rows[row]=1
-        else
-          rows[row]=rows[row]+1
-        end
-      end
+      table.insert(sortedKeys,k)
     end
-  end
-  return rows
+    table.sort(sortedKeys)
+    local key=""
+    
+    for _,k in ipairs(sortedKeys) do
+      --key=key..k.."="..MM.base64(transaction[k].." ")
+      key=key..k.."="..MM.toEncoding(const.fixEncoding,transaction[k]).." "
+    end
+  return key
 end
 
-function RegressionTest.compareTrees(now,master)
-  local differences=0
-  for k,v in pairs(master) do
-    if now[k] ~= nil then
-      now[k]=now[k]-v
-      master[k]=0
+function RegressionTest.makeKeys(transactions)
+  local keys={}
+  for _,transaction in pairs(transactions) do
+    
+    keys[RegressionTest.getKey(transaction)]=true
+    
+  end
+  
+  return keys
+end
+
+
+function RegressionTest.compareTransactions(now,master,differences,text)
+  local keys=RegressionTest.makeKeys(now)
+  for _,transaction in pairs(master) do
+    local key=RegressionTest.getKey(transaction)
+    
+    if keys[key] ~= true then
+      local diff={}
+      for k,v in pairs(transaction) do
+        diff[k]=v
+      end
+      diff.name=diff.name.." "..text
+      diff.amount=tonumber(diff.amount)
+      diff.purpose=diff.purpose.."\n"..MM.base64(key)
+      table.insert(differences,diff)
     end
   end
-  for k,v in pairs(now) do
-    if master[k] ~= nil then
-      master[k]=master[k]-v
-      now[k]=0
-    end
-  end
-  debugBuffer.print("differences master")
-  for k,v in pairs(master) do
-    if v ~=0 then
-      debugBuffer.print("n="..v," value="..MM.base64decode(k))
-      differences=differences+1
-    end
-  end
-  debugBuffer.print("differences now")
-  for k,v in pairs(now) do
-    if v ~=0 then
-      debugBuffer.print("n="..v," value="..MM.base64decode(k))
-      differences=differences+1
-    end
-  end
-  debugBuffer.print("differences="..differences)
+  
   return differences
 end
 
@@ -468,17 +467,29 @@ function RegressionTest.run(transactions,regTestPre)
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
 
+      for _,v in pairs(transactions) do
+        v.amount=tostring(v.amount)
+      end
       local transFile=io.open(regTestPre.."_transactions.json","wb")
-      local now=RegressionTest.makeRows(transactions)
-      transFile:write(JSON():set(now):json())
+      transFile:write(JSON():set(transactions):json())
       transFile.close()
 
+      local differences={}
 
-      local num=RegressionTest.compareTrees(now,master)
+      RegressionTest.compareTransactions(transactions,master,differences,"master")
+      RegressionTest.compareTransactions(master,transactions,differences,"now")
+      
+      local count = #transactions
+      local i
+      for i=0, count do transactions[i]=nil end
+      for _,v in pairs(differences) do
+        table.insert(transactions,v)
+      end
+
       debugBuffer.print("regression test finish")
       table.insert(transactions,{
         name="regression test finish",
-        amount = num,
+        amount = #differences,
         bookingDate = os.time(),
         purpose = 'run '..LocalStorage.loginCounter,
         booked = false,
@@ -494,6 +505,8 @@ function RegressionTest.run(transactions,regTestPre)
       })
     end
   end
+  debugBuffer.print(transactions)
+  debugBuffer.flush()
 end
 
 function connectShopWithCheck(method, url, postContent, postContentType, headers)
@@ -717,7 +730,7 @@ function getArticleFromShipment(shipment,order,doInsert)
         purpose=row:text()
       else
         local price=getPrice(row:text())
-        if price~=invalidPrice then
+        if price~=invalidPrice and amount == invalidPrice then
           amount=price
         end
       end
@@ -1865,8 +1878,8 @@ function RefreshAccount (account, since)
   end
 
   --print(balance)
-  RegressionTest.run(transactions,account.accountNumber)
   if config.debug then
+    RegressionTest.run(transactions,account.accountNumber)
     if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
       debugBuffer.print(LocalStorage.OrderCache[config.rescanOrder])
     end
