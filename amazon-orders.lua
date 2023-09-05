@@ -1420,7 +1420,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     loginLoops=loginLoops+1
   until(leaveLoginLoop or loginLoops>10)
 
-  if html:xpath(const.xpathOrderMonthForm):length() > 0 then
+  if html:xpath("//form[contains(@action,'order-history')]"):length() > 0 then
     print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
@@ -1570,7 +1570,7 @@ function RefreshAccount (account, since)
       LocalStorage.invalidCache={}
     end
 
-    local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    local orderFilterSelect=html:xpath('//select[@name="timeFilter"]'):children()
     local numbersOfNewOrders=0
     orderFilterSelect:each(function(index,element)
       local orderFilterVal=element:attr('value')
@@ -1579,8 +1579,8 @@ function RefreshAccount (account, since)
       if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
-        html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
-        html=connectShop(html:xpath(const.xpathOrderMonthForm):submit())
+        html:xpath('//*[@name="timeFilter"]'):select(orderFilterVal)
+        html=connectShop(html:xpath("//form[contains(@action,'orders')]"):submit())
 
         local foundEnd=false
         repeat
@@ -1614,7 +1614,7 @@ function RefreshAccount (account, since)
 
     local newestMessage=LocalStorage.newestMessage
 
-    for orderCode,messageTime in pairs(getMessageList(LocalStorage.newestMessage)) do
+    for orderCode,messageTime in pairs(getMessageList(newestMessage)) do
 
       if newestMessage<messageTime then
         newestMessage=messageTime
