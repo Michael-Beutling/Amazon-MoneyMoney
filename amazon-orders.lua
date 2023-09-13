@@ -88,6 +88,7 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
+  xpathOrderMonthForm="//form[contains(@action,'order-history')][.//option]",
   orderListLink='/gp/your-account/order-history?unifiedOrders=1',
   monthlyContra="monthy contra",
   yearlyContra="yearly contra",
@@ -1419,7 +1420,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     loginLoops=loginLoops+1
   until(leaveLoginLoop or loginLoops>10)
 
-  if html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):length() > 0 then
+  if html:xpath(const.xpathOrderMonthForm):length() > 0 then
     print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
@@ -1579,7 +1580,7 @@ function RefreshAccount (account, since)
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
         html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
-        html=connectShop(html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):submit())
+        html=connectShop(html:xpath(const.xpathOrderMonthForm):submit())
 
         local foundEnd=false
         repeat
