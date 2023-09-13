@@ -88,7 +88,6 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
-  xpathOrderMonthForm="//form[contains(@action,'order-history')][.//option]",
   orderListLink='/gp/your-account/order-history?unifiedOrders=1',
   monthlyContra="monthy contra",
   yearlyContra="yearly contra",
