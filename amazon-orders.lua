@@ -2,7 +2,7 @@
 --
 -- Plugin Homepage https://github.com/Michael-Beutling/Amazon-MoneyMoney
 --
--- Copyright 2019-2022 Michael Beutling
+-- Copyright 2019-2023 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -88,7 +88,8 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
-  xpathOrderMonthForm="//form[contains(@action,'order-history')][.//option]",
+  xpathOrderMonthForm="//form[contains(@action,'order')][.//option]",
+  xpathOrderMonthSelect='//select[@name="orderFilter" or @name="timeFilter"]',
   orderListLink='/gp/your-account/order-history?unifiedOrders=1',
   monthlyContra="monthy contra",
   yearlyContra="yearly contra",
@@ -195,7 +196,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.22,
+WebBanking{version  = 1.23,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -1019,7 +1020,7 @@ function getMessageList(since)
         for _,k in pairs({'messageSentTime','message-sent-time-in-ms','messageId','message-id','threadId','thread-id'}) do
           message[k]=td:attr(k:lower())
         end
-        if message['message-sent-time-in-ms'] ~= nil then
+        if message['message-sent-time-in-ms'] ~= '' then
           message.messageSentTime=message['message-sent-time-in-ms']
           message.threadId=message['threadId']
           message.messageId=message['message-id']
@@ -1570,16 +1571,16 @@ function RefreshAccount (account, since)
       LocalStorage.invalidCache={}
     end
 
-    local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    local orderFilterSelect=html:xpath(const.xpathOrderMonthSelect):children()
     local numbersOfNewOrders=0
     orderFilterSelect:each(function(index,element)
       local orderFilterVal=element:attr('value')
       local foundOrders=true
       local foundNewOrders=false
-      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
+      if string.match(orderFilterVal, "last") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
-        html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
+        html:xpath(const.xpathOrderMonthSelect):select(orderFilterVal)
         html=connectShop(html:xpath(const.xpathOrderMonthForm):submit())
 
         local foundEnd=false
