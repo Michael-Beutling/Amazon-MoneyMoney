@@ -22,6 +22,10 @@ Some hard coded parameters can be overwritten in the MoneyMoney account settings
 ## Performance
 The script caches some data, but the first time it scrapes your whole order history. In facts ~10 years of shopping with about 230 orders with 340 positions takes 12 minutes in the first run! The second run needs 2 minutes. After that all data is cached so a normal run needs 20-30 seconds.
 
+## Reset cache to enforce full order history reload
+In MoneyMoney right-click the account, select settings, then notes. Add the attribute resetCache with any value, e.g. today's date.
+Going forward, whenever the attribute value gets changed, the cache is cleared and the whole account is reread.
+
 ## Blacklist invalid orders
 Orders that cause erros can be omitted via the blackListOrders attribute in the settings. Simply enter the order numbers separated by commas as a value. See screen shot above.
 

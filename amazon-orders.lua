@@ -2,7 +2,7 @@
 --
 -- Plugin Homepage https://github.com/Michael-Beutling/Amazon-MoneyMoney
 --
--- Copyright 2019-2022 Michael Beutling
+-- Copyright 2019-2023 Michael Beutling
 
 -- Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files
 -- (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify,
@@ -31,7 +31,7 @@ local webCacheState='start'
 local invalidPrice=1e99
 local invalidDate=1e99
 local invalidQty=1e99
-local cacheVersion=10
+local cacheVersion=11
 local debugBuffer={context=''}
 local webCacheLastId=nil
 
@@ -88,6 +88,8 @@ local const={
   fixEncoding='latin1',
   differenceText='Difference (shipping costs, coupon etc.)',
   xpathOrderHistoryLink='//a[@id="nav-orders" or contains(@href,"/order-history")]',
+  xpathOrderMonthForm="//form[contains(@action,'order')][.//option]",
+  xpathOrderMonthSelect='//select[@name="orderFilter" or @name="timeFilter"]',
   orderListLink='/gp/your-account/order-history?unifiedOrders=1',
   monthlyContra="monthy contra",
   yearlyContra="yearly contra",
@@ -194,7 +196,7 @@ if debug ~= nil then
 end
 local baseurl='https://www'..const.domain
 
-WebBanking{version  = 1.21,
+WebBanking{version  = 1.23,
   url         = baseurl,
   services    = const.services,
   description = const.description}
@@ -409,52 +411,51 @@ end
 
 local RegressionTest={}
 
-function RegressionTest.makeRows(transactions)
-  local rows={}
-  for _,transaction in pairs(transactions) do
+
+function RegressionTest.getKey(transaction)
+    local sortedKeys={}
     for k,v in pairs(transaction) do
-      if k ~= 'name' then
-        local row=MM.base64(transaction.name.." "..k.."("..type(v)..")".."='"..tostring(v).."'")
-        if rows[row]==nil then
-          rows[row]=1
-        else
-          rows[row]=rows[row]+1
-        end
-      end
+      table.insert(sortedKeys,k)
     end
-  end
-  return rows
+    table.sort(sortedKeys)
+    local key=""
+
+    for _,k in ipairs(sortedKeys) do
+      --key=key..k.."="..MM.base64(transaction[k].." ")
+      key=key..k.."="..MM.toEncoding(const.fixEncoding,transaction[k]).." "
+    end
+  return key
 end
 
-function RegressionTest.compareTrees(now,master)
-  local differences=0
-  for k,v in pairs(master) do
-    if now[k] ~= nil then
-      now[k]=now[k]-v
-      master[k]=0
+function RegressionTest.makeKeys(transactions)
+  local keys={}
+  for _,transaction in pairs(transactions) do
+
+    keys[RegressionTest.getKey(transaction)]=true
+
+  end
+
+  return keys
+end
+
+
+function RegressionTest.compareTransactions(now,master,differences,text)
+  local keys=RegressionTest.makeKeys(now)
+  for _,transaction in pairs(master) do
+    local key=RegressionTest.getKey(transaction)
+
+    if keys[key] ~= true then
+      local diff={}
+      for k,v in pairs(transaction) do
+        diff[k]=v
+      end
+      diff.name=diff.name.." "..text
+      diff.amount=tonumber(diff.amount)
+      diff.purpose=diff.purpose.."\n"..MM.base64(key)
+      table.insert(differences,diff)
     end
   end
-  for k,v in pairs(now) do
-    if master[k] ~= nil then
-      master[k]=master[k]-v
-      now[k]=0
-    end
-  end
-  debugBuffer.print("differences master")
-  for k,v in pairs(master) do
-    if v ~=0 then
-      debugBuffer.print("n="..v," value="..MM.base64decode(k))
-      differences=differences+1
-    end
-  end
-  debugBuffer.print("differences now")
-  for k,v in pairs(now) do
-    if v ~=0 then
-      debugBuffer.print("n="..v," value="..MM.base64decode(k))
-      differences=differences+1
-    end
-  end
-  debugBuffer.print("differences="..differences)
+
   return differences
 end
 
@@ -468,17 +469,29 @@ function RegressionTest.run(transactions,regTestPre)
       local master=JSON(transFile:read('*all')):dictionary()
       transFile.close()
 
+      for _,v in pairs(transactions) do
+        v.amount=tostring(v.amount)
+      end
       local transFile=io.open(regTestPre.."_transactions.json","wb")
-      local now=RegressionTest.makeRows(transactions)
-      transFile:write(JSON():set(now):json())
+      transFile:write(JSON():set(transactions):json())
       transFile.close()
 
+      local differences={}
 
-      local num=RegressionTest.compareTrees(now,master)
+      RegressionTest.compareTransactions(transactions,master,differences,"master")
+      RegressionTest.compareTransactions(master,transactions,differences,"now")
+
+      local count = #transactions
+      local i
+      for i=0, count do transactions[i]=nil end
+      for _,v in pairs(differences) do
+        table.insert(transactions,v)
+      end
+
       debugBuffer.print("regression test finish")
       table.insert(transactions,{
         name="regression test finish",
-        amount = num,
+        amount = #differences,
         bookingDate = os.time(),
         purpose = 'run '..LocalStorage.loginCounter,
         booked = false,
@@ -494,6 +507,8 @@ function RegressionTest.run(transactions,regTestPre)
       })
     end
   end
+  debugBuffer.print(transactions)
+  debugBuffer.flush()
 end
 
 function connectShopWithCheck(method, url, postContent, postContentType, headers)
@@ -717,7 +732,7 @@ function getArticleFromShipment(shipment,order,doInsert)
         purpose=row:text()
       else
         local price=getPrice(row:text())
-        if price~=invalidPrice then
+        if price~=invalidPrice and amount == invalidPrice then
           amount=price
         end
       end
@@ -1005,7 +1020,7 @@ function getMessageList(since)
         for _,k in pairs({'messageSentTime','message-sent-time-in-ms','messageId','message-id','threadId','thread-id'}) do
           message[k]=td:attr(k:lower())
         end
-        if message['message-sent-time-in-ms'] ~= nil then
+        if message['message-sent-time-in-ms'] ~= '' then
           message.messageSentTime=message['message-sent-time-in-ms']
           message.threadId=message['threadId']
           message.messageId=message['message-id']
@@ -1406,7 +1421,7 @@ function InitializeSession2 (protocol, bankCode, step, credentials, interactive)
     loginLoops=loginLoops+1
   until(leaveLoginLoop or loginLoops>10)
 
-  if html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):length() > 0 then
+  if html:xpath(const.xpathOrderMonthForm):length() > 0 then
     print('login success')
     aName=html:xpath('//span[@class="nav-shortened-name"]'):text()
     if aName == "" then
@@ -1556,17 +1571,17 @@ function RefreshAccount (account, since)
       LocalStorage.invalidCache={}
     end
 
-    local orderFilterSelect=html:xpath('//select[@name="orderFilter"]'):children()
+    local orderFilterSelect=html:xpath(const.xpathOrderMonthSelect):children()
     local numbersOfNewOrders=0
     orderFilterSelect:each(function(index,element)
       local orderFilterVal=element:attr('value')
       local foundOrders=true
       local foundNewOrders=false
-      if string.match(orderFilterVal, "months-") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
+      if string.match(orderFilterVal, "last") or LocalStorage.orderFilterCache[orderFilterVal] == nil and numbersOfNewOrders < config.limitOrders + 1 then
         MM.printStatus('Get order overview for "'..element:text()..'"')
         --print(orderFilterVal)
-        html:xpath('//*[@name="orderFilter"]'):select(orderFilterVal)
-        html=connectShop(html:xpath("//form[contains(@action,'order-history') and not(contains(@action,'search'))]"):submit())
+        html:xpath(const.xpathOrderMonthSelect):select(orderFilterVal)
+        html=connectShop(html:xpath(const.xpathOrderMonthForm):submit())
 
         local foundEnd=false
         repeat
@@ -1865,8 +1880,8 @@ function RefreshAccount (account, since)
   end
 
   --print(balance)
-  RegressionTest.run(transactions,account.accountNumber)
   if config.debug then
+    RegressionTest.run(transactions,account.accountNumber)
     if LocalStorage.OrderCache[config.rescanOrder] ~= nil then
       debugBuffer.print(LocalStorage.OrderCache[config.rescanOrder])
     end
@@ -1904,4 +1919,4 @@ function EndSession ()
   end
 end
 
--- SIGNATURE: MC4CFQCWaBbxVgsiwyb3GfcH6v4u7UfJMAIVAIjE1bZcSderEyYQ5QLjFa+sHUh9
+-- SIGNATURE: MC0CFQCg3Xx1caAmorsgCaZR9jdKxUuhVQIUMOWRe89OjSVT+tqiB/epNqAxNek=
